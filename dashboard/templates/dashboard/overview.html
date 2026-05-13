@@ -1,0 +1,74 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Overview — Media Monitor{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Overview</h2>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card text-center stat-card h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Seed Sources</div>
+        <div class="display-6">{{ active_seeds }}<small class="fs-6 text-muted"> / {{ total_seeds }}</small></div>
+        <div class="text-muted small">active / total</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center stat-card h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Articles</div>
+        <div class="display-6">{{ unique_articles }}<small class="fs-6 text-muted"> / {{ total_articles }}</small></div>
+        <div class="text-muted small">unique / total</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center stat-card h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Pending URLs</div>
+        <div class="display-6">{{ url_by_status.pending|default:0 }}</div>
+        <div class="text-muted small">awaiting fetch</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center stat-card h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-1">Failed URLs</div>
+        <div class="display-6 {% if url_by_status.failed %}text-danger{% endif %}">{{ url_by_status.failed|default:0 }}</div>
+        <div class="text-muted small">fetch errors</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h5 class="mb-0">Recent Articles</h5>
+  <a href="{% url 'dashboard:article-list' %}" class="small">View all →</a>
+</div>
+<div class="card">
+  <table class="table table-hover mb-0">
+    <thead class="table-light">
+      <tr>
+        <th>Title</th>
+        <th>Domain</th>
+        <th>Language</th>
+        <th>Published</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for article in recent_articles %}
+      <tr>
+        <td><a href="{% url 'dashboard:article-detail' article.pk %}" class="text-decoration-none">{{ article.title|truncatechars:80 }}</a></td>
+        <td class="text-muted small">{{ article.source_domain }}</td>
+        <td class="text-muted small">{{ article.language }}</td>
+        <td class="text-muted small">{{ article.published_at|date:"Y-m-d"|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-muted text-center py-3">No articles yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

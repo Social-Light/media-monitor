@@ -1,0 +1,64 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ article.title|truncatechars:60 }} — Media Monitor{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'dashboard:article-list' %}" class="text-muted small">← Articles</a>
+</div>
+
+<h2>{{ article.title }}</h2>
+
+<p class="text-muted">
+  {{ article.source_domain }}
+  {% if article.author %} &middot; {{ article.author }}{% endif %}
+  {% if article.published_at %} &middot; {{ article.published_at|date:"F j, Y" }}{% endif %}
+  {% if article.language %} &middot; <span class="badge bg-light text-dark border">{{ article.language }}</span>{% endif %}
+  {% if article.is_duplicate %} &middot; <span class="badge bg-warning text-dark">duplicate</span>{% endif %}
+</p>
+
+{% if article.signals.sentiment %}
+<p>
+  Sentiment:
+  {% if article.signals.sentiment == "positive" %}
+    <span class="badge bg-success">positive</span>
+  {% elif article.signals.sentiment == "negative" %}
+    <span class="badge bg-danger">negative</span>
+  {% else %}
+    <span class="badge bg-secondary">{{ article.signals.sentiment }}</span>
+  {% endif %}
+</p>
+{% endif %}
+
+{% if article.tags %}
+<p>
+  {% for tag in article.tags %}
+    <span class="badge bg-light text-dark border me-1">{{ tag }}</span>
+  {% endfor %}
+</p>
+{% endif %}
+
+{% if article.signals.entities %}
+<div class="mb-3">
+  {% for label, names in article.signals.entities.items %}
+    <span class="text-muted small me-2"><strong>{{ label }}:</strong> {{ names|join:", " }}</span>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if article.summary %}
+<div class="alert alert-light border mb-3">
+  <strong>Summary:</strong> {{ article.summary }}
+</div>
+{% endif %}
+
+{% if article.body_text %}
+<div class="card mb-4">
+  <div class="card-body" style="white-space: pre-wrap; font-family: Georgia, serif; font-size: .95rem; line-height: 1.7;">{{ article.body_text }}</div>
+</div>
+{% endif %}
+
+<p class="text-muted small">
+  Source: <a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.url }}</a><br>
+  Indexed: {{ article.created_at|date:"Y-m-d H:i" }}
+</p>
+{% endblock %}

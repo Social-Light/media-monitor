@@ -1,0 +1,40 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ action }} Seed — Media Monitor{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'dashboard:seed-list' %}" class="text-muted small">← Seeds</a>
+</div>
+<h2 class="mb-4">{{ action }} Seed</h2>
+
+<div class="card" style="max-width: 640px;">
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      {% for field in form %}
+      <div class="mb-3">
+        {% if field.field.widget.input_type == "checkbox" %}
+          <div class="form-check">
+            {{ field }}
+            <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          </div>
+        {% else %}
+          <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+        {% endif %}
+        {% if field.errors %}
+          <div class="text-danger small mt-1">{{ field.errors.0 }}</div>
+        {% endif %}
+        {% if field.help_text %}
+          <div class="form-text text-muted">{{ field.help_text }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      <div class="d-flex gap-2 mt-4">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="{% url 'dashboard:seed-list' %}" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

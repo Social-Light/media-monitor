@@ -1,0 +1,56 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Seeds — Media Monitor{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">Seed Sources</h2>
+  <a href="{% url 'dashboard:seed-create' %}" class="btn btn-primary">+ Add Seed</a>
+</div>
+
+<div class="card">
+  <table class="table table-hover mb-0">
+    <thead class="table-light">
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Interval</th>
+        <th>Last Crawled</th>
+        <th>Articles</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for seed in seeds %}
+      <tr>
+        <td>
+          <div class="fw-semibold">{{ seed.name }}</div>
+          <div class="text-muted small text-truncate" style="max-width:300px;">{{ seed.url }}</div>
+        </td>
+        <td><span class="badge bg-secondary">{{ seed.get_source_type_display }}</span></td>
+        <td>
+          {% if seed.is_active %}
+            <span class="badge bg-success">Active</span>
+          {% else %}
+            <span class="badge bg-light text-muted border">Inactive</span>
+          {% endif %}
+        </td>
+        <td class="text-muted small">{{ seed.crawl_interval }}m</td>
+        <td class="text-muted small">{{ seed.last_crawled_at|date:"Y-m-d H:i"|default:"Never" }}</td>
+        <td class="text-muted small">{{ seed.article_count }}</td>
+        <td class="text-end">
+          <a href="{% url 'dashboard:seed-edit' seed.pk %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+          <a href="{% url 'dashboard:seed-delete' seed.pk %}" class="btn btn-sm btn-outline-danger ms-1">Delete</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="7" class="text-center text-muted py-4">
+          No seeds yet. <a href="{% url 'dashboard:seed-create' %}">Add one.</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

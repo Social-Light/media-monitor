@@ -30,11 +30,17 @@ import time
 from urllib.parse import urlparse
 
 import newspaper
-from django.utils import timezone
 
 from core.models import URLStatusChoices
 from core.utils import get_session
 from discovery.models import DiscoveredURL
+from fetcher.dedup import check_and_mark_duplicate
+from fetcher.extractor import apply_rule, get_rule_for_page
+from fetcher.nlp import run_nlp
+from fetcher.playwright_fetcher import render_page
+from fetcher.search import index_article
+from alerts.matching import check_alerts
+from alerts.notifications import dispatch_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +65,6 @@ def fetch_page(discovered_url: DiscoveredURL):
 
     url     = discovered_url.url
     timeout = settings.CRAWLER["REQUEST_TIMEOUT"]
-    session = get_session()
 
     # Mark as in-progress
     discovered_url.status = URLStatusChoices.FETCHING
@@ -68,27 +73,40 @@ def fetch_page(discovered_url: DiscoveredURL):
     start = time.monotonic()
 
     try:
-        response     = session.get(url, timeout=timeout)
-        duration_ms  = int((time.monotonic() - start) * 1000)
+        if discovered_url.seed.use_playwright:
+            raw_html     = render_page(url, timeout_ms=timeout * 1000)
+            duration_ms  = int((time.monotonic() - start) * 1000)
+            status_code  = 200
+            content_type = "text/html; charset=utf-8"
+            encoding     = "utf-8"
+            fetch_ok     = True
+        else:
+            response     = get_session().get(url, timeout=timeout)
+            duration_ms  = int((time.monotonic() - start) * 1000)
+            raw_html     = response.text
+            status_code  = response.status_code
+            content_type = response.headers.get("Content-Type", "")
+            encoding     = response.encoding or ""
+            fetch_ok     = response.ok
 
         fetched_page = FetchedPage.objects.create(
             discovered_url    = discovered_url,
-            status_code       = response.status_code,
-            content_type      = response.headers.get("Content-Type", ""),
-            encoding          = response.encoding or "",
-            raw_html          = response.text,
+            status_code       = status_code,
+            content_type      = content_type,
+            encoding          = encoding,
+            raw_html          = raw_html,
             fetch_duration_ms = duration_ms,
         )
 
-        if response.ok:
+        if fetch_ok:
             discovered_url.status = URLStatusChoices.FETCHED
             discovered_url.error_message = ""
         else:
             discovered_url.status = URLStatusChoices.FAILED
-            discovered_url.error_message = f"HTTP {response.status_code}"
+            discovered_url.error_message = f"HTTP {status_code}"
 
         discovered_url.save(update_fields=["status", "error_message"])
-        logger.info("Fetched [%d] %s in %dms", response.status_code, url, duration_ms)
+        logger.info("Fetched [%d] %s in %dms", status_code, url, duration_ms)
         return fetched_page
 
     except Exception as exc:
@@ -137,11 +155,26 @@ def parse_page(fetched_page):
     language    = (article.meta_lang or "").strip()[:10]
     source_domain = urlparse(url).netloc
 
+    # Apply per-site extraction rule overrides (takes priority over newspaper3k)
+    rule = get_rule_for_page(url)
+    if rule:
+        overrides    = apply_rule(rule, fetched_page.raw_html, url)
+        title        = overrides.get('title',        title)
+        body_text    = overrides.get('body_text',    body_text)
+        author       = overrides.get('author',       author)
+        published_at = overrides.get('published_at', published_at)
+
     # Build tags from meta_keywords + tags set
     tags = _collect_tags(article)
 
     # Build signals dict — the JSON field used later for alerting
     signals = _collect_signals(article)
+
+    # Enrich signals with NLP (named entities + sentiment)
+    try:
+        signals.update(run_nlp(body_text))
+    except Exception as exc:
+        logger.warning("NLP failed for %s: %s", url, exc)
 
     # Use the discovery-time title as fallback if newspaper couldn't find one
     if not title:
@@ -162,6 +195,24 @@ def parse_page(fetched_page):
         tags          = tags,
         signals       = signals,
     )
+
+    try:
+        check_and_mark_duplicate(parsed_article)
+    except Exception as exc:
+        logger.warning("Dedup check failed for %s: %s", url, exc)
+
+    try:
+        if not parsed_article.is_duplicate:
+            index_article(parsed_article)
+    except Exception as exc:
+        logger.warning("Elasticsearch indexing failed for %s: %s", url, exc)
+
+    try:
+        if not parsed_article.is_duplicate:
+            for match in check_alerts(parsed_article):
+                dispatch_notifications(match)
+    except Exception as exc:
+        logger.warning("Alert matching failed for %s: %s", url, exc)
 
     fetched_page.discovered_url.status = URLStatusChoices.PARSED
     fetched_page.discovered_url.error_message = ""

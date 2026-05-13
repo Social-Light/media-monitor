@@ -1,0 +1,46 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Articles — Media Monitor{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">Articles</h2>
+
+<form class="row g-2 mb-3"
+      hx-get="{% url 'dashboard:article-list' %}"
+      hx-target="#article-table"
+      hx-trigger="input changed delay:400ms from:#q-input, change from:.filter-select, change from:#show-dups">
+  <div class="col-12 col-md-4">
+    <input id="q-input" type="text" name="q" value="{{ q }}"
+           class="form-control" placeholder="Search title or summary…">
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="source_domain" class="form-select filter-select">
+      <option value="">All domains</option>
+      {% for d in domains %}
+        <option value="{{ d }}" {% if d == source_domain %}selected{% endif %}>{{ d }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="language" class="form-select filter-select">
+      <option value="">All languages</option>
+      {% for lang in languages %}
+        <option value="{{ lang }}" {% if lang == language %}selected{% endif %}>{{ lang }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2 d-flex align-items-center">
+    <div class="form-check">
+      <input type="checkbox" name="show_duplicates" value="1" id="show-dups"
+             class="form-check-input" {% if show_dups %}checked{% endif %}>
+      <label for="show-dups" class="form-check-label small">Show duplicates</label>
+    </div>
+  </div>
+  <div class="col-6 col-md-1">
+    <button type="submit" class="btn btn-primary w-100">Go</button>
+  </div>
+</form>
+
+<div id="article-table">
+  {% include "dashboard/articles/_table.html" %}
+</div>
+{% endblock %}

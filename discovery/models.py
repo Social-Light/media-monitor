@@ -86,6 +86,15 @@ class SeedSource(TimeStampedModel):
         ),
     )
 
+    # ── Rendering ─────────────────────────────────────────────────────────────
+    use_playwright = models.BooleanField(
+        default=False,
+        help_text=(
+            "Use headless Chromium (Playwright) to render articles from this "
+            "seed. Enable for JS-heavy sites where plain HTTP returns incomplete HTML."
+        ),
+    )
+
     # ── Extra config ──────────────────────────────────────────────────────────
     meta = models.JSONField(
         default=dict,

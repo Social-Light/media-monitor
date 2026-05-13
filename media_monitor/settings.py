@@ -32,12 +32,16 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS: list[str] = [
     "django_celery_beat",
     "django_celery_results",
+    "rest_framework",
 ]
 
 PROJECT_APPS: list[str] = [
     "core",
     "discovery",
     "fetcher",
+    "api",
+    "dashboard",
+    "alerts",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
@@ -147,6 +151,13 @@ CRAWLER = {
     "GOOGLE_CSE_ID":       env("GOOGLE_CSE_ID",       default=""),
 }
 
+# ── Elasticsearch ─────────────────────────────────────────────────────────────
+ELASTICSEARCH = {
+    "HOSTS":   [env("ELASTICSEARCH_URL",     default="http://localhost:9200")],
+    "INDEX":   env("ELASTICSEARCH_INDEX",    default="articles"),
+    "TIMEOUT": env.int("ELASTICSEARCH_TIMEOUT", default=10),
+}
+
 # ── Celery ────────────────────────────────────────────────────────────────────
 CELERY_BROKER_URL          = env("REDIS_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND      = "django-db"
@@ -158,3 +169,16 @@ CELERY_BEAT_SCHEDULER      = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TASK_TRACK_STARTED  = True
 CELERY_TASK_TIME_LIMIT     = 300   # hard kill after 5 minutes
 CELERY_TASK_SOFT_TIME_LIMIT = 240  # raises SoftTimeLimitExceeded after 4 minutes
+
+# ── Email ─────────────────────────────────────────────────────────────────────
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="alerts@mediamonitor.local")
+EMAIL_BACKEND      = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+
+# ── Django REST Framework ─────────────────────────────────────────────────────
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+}

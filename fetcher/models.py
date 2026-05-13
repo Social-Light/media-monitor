@@ -20,7 +20,7 @@ Design decisions:
 from django.db import models
 
 from core.models import TimeStampedModel
-from discovery.models import DiscoveredURL
+from discovery.models import DiscoveredURL, SeedSource
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +173,31 @@ class ParsedArticle(TimeStampedModel):
         help_text="NLP-derived signals: keywords, named entities, sentiment, etc.",
     )
 
+    # ── Deduplication ──────────────────────────────────────────────────────────
+    content_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        db_index=True,
+        help_text="SHA-256 of normalised body text.",
+    )
+    canonical_url = models.URLField(
+        blank=True,
+        help_text='<link rel="canonical"> href extracted from the page.',
+    )
+    duplicate_of = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="duplicates",
+        help_text="Original article this is a duplicate of.",
+    )
+    is_duplicate = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="True if this article is a duplicate of another.",
+    )
+
     class Meta:
         verbose_name = "Parsed Article"
         verbose_name_plural = "Parsed Articles"
@@ -200,3 +225,72 @@ class ParsedArticle(TimeStampedModel):
     def has_body(self) -> bool:
         """True if meaningful body text was extracted."""
         return self.word_count > 50
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model 3 — ExtractionRule
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ExtractionRule(TimeStampedModel):
+    """
+    Per-domain CSS selector overrides for article field extraction.
+
+    When a FetchedPage's URL matches the rule's domain, the selectors here
+    are applied after newspaper3k and their results take priority.  Any
+    selector left blank means "fall back to newspaper3k for that field."
+    """
+
+    seed = models.ForeignKey(
+        SeedSource,
+        on_delete=models.CASCADE,
+        related_name="rules",
+        help_text="Seed source that owns this rule.",
+    )
+    domain = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Exact hostname to match, e.g. 'www.miningweekly.com'.",
+    )
+
+    # ── CSS selectors ──────────────────────────────────────────────────────
+    title_selector = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="CSS selector for the article title element.",
+    )
+    body_selector = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="CSS selector for the article body element.",
+    )
+    author_selector = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="CSS selector for the author element.",
+    )
+    date_selector = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="CSS selector for the publication date element.",
+    )
+    date_format = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text=(
+            "strptime format string for date_selector text, "
+            "e.g. '%%d %%B %%Y'. Leave blank to auto-parse ISO 8601."
+        ),
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive rules are ignored during extraction.",
+    )
+
+    class Meta:
+        verbose_name = "Extraction Rule"
+        verbose_name_plural = "Extraction Rules"
+        ordering = ["domain"]
+
+    def __str__(self):
+        return f"ExtractionRule({self.domain})"
