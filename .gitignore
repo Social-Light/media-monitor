@@ -60,8 +60,9 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-# NOTE: migrations are source code and MUST be committed — do not ignore them.
-# Their __pycache__ is already covered by the global __pycache__/ rule above.
+# Ignore Django migration files and packages; new migrations will not be tracked.
+migrations/
+!**/migrations/__init__.py
 
 # Flask stuff:
 instance/
