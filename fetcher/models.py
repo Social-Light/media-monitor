@@ -144,6 +144,14 @@ class ParsedArticle(TimeStampedModel):
         help_text="Hostname of the source URL, e.g. 'www.miningweekly.com'.",
     )
 
+    # ── Geography ──────────────────────────────────────────────────────────
+    country = models.CharField(
+        max_length=100,
+        blank=True,
+        db_index=True,
+        help_text="Publication country of the article (never empty after parse).",
+    )
+
     # ── Language & tags ────────────────────────────────────────────────────
     language = models.CharField(
         max_length=10,

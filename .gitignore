@@ -60,7 +60,8 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-**/migrations/
+# NOTE: migrations are source code and MUST be committed — do not ignore them.
+# Their __pycache__ is already covered by the global __pycache__/ rule above.
 
 # Flask stuff:
 instance/
@@ -198,6 +199,21 @@ cython_debug/
 # Visual Studio Code
 #   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
+
+# Hidden duplicate files created by some OS/editor tools
+._*
+.DS_Store
+Thumbs.db
+ehthumbs.db
+CLAUDE.md
+.claude
+# NOTE: .github/ is intentionally tracked so CI (.github/workflows/ci.yml) runs on push.
+
+# Hidden duplicate files created by some OS/editor tools
+._*
+.DS_Store
+Thumbs.db
+ehthumbs.db
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #   you could uncomment the following to ignore the entire vscode folder
 # .vscode/

@@ -49,6 +49,7 @@ def send_webhook_alert(match: AlertMatch) -> None:
             "title":         article.title,
             "url":           article.url,
             "source_domain": article.source_domain,
+            "country":       article.country,
             "language":      article.language,
             "published_at":  article.published_at.isoformat() if article.published_at else None,
             "summary":       article.summary,
@@ -56,7 +57,12 @@ def send_webhook_alert(match: AlertMatch) -> None:
         },
     }
 
-    response = _requests.post(alert.webhook_url, json=payload, timeout=10)
+    headers = {}
+    secret = settings.MEDIA_MONITOR_WEBHOOK_SECRET
+    if secret:
+        headers["X-Webhook-Secret"] = secret
+
+    response = _requests.post(alert.webhook_url, json=payload, headers=headers, timeout=10)
     response.raise_for_status()
     logger.debug("Webhook alert sent for match %d to %s", match.pk, alert.webhook_url)
 

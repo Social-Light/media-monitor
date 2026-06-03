@@ -32,8 +32,10 @@ from urllib.parse import urlparse
 import newspaper
 
 from core.models import URLStatusChoices
+from core.throttle import wait_for_domain
 from core.utils import get_session
 from discovery.models import DiscoveredURL
+from fetcher.country import detect_country
 from fetcher.dedup import check_and_mark_duplicate
 from fetcher.extractor import apply_rule, get_rule_for_page
 from fetcher.nlp import run_nlp
@@ -70,6 +72,7 @@ def fetch_page(discovered_url: DiscoveredURL):
     discovered_url.status = URLStatusChoices.FETCHING
     discovered_url.save(update_fields=["status"])
 
+    wait_for_domain(url)
     start = time.monotonic()
 
     try:
@@ -176,6 +179,9 @@ def parse_page(fetched_page):
     except Exception as exc:
         logger.warning("NLP failed for %s: %s", url, exc)
 
+    # Determine publication country — never empty
+    country = detect_country(source_domain, signals)
+
     # Use the discovery-time title as fallback if newspaper couldn't find one
     if not title:
         title = fetched_page.discovered_url.title or ""
@@ -191,6 +197,7 @@ def parse_page(fetched_page):
         author        = author,
         published_at  = published_at,
         source_domain = source_domain,
+        country       = country,
         language      = language,
         tags          = tags,
         signals       = signals,

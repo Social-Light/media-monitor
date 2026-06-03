@@ -16,7 +16,7 @@ import os
 from celery import Celery
 
 # Tell Celery which Django settings module to use
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "media_monitor.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "media_monitor.settings.development")
 
 app = Celery("media_monitor")
 

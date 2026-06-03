@@ -9,9 +9,19 @@ import logging
 from urllib.parse import urlparse, urljoin
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+_RETRY_STRATEGY = Retry(
+    total=3,
+    backoff_factor=1,          # sleeps: 0 s, 1 s, 2 s between retries
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "HEAD"],
+    raise_on_status=False,
+)
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -19,7 +29,7 @@ logger = logging.getLogger(__name__)
 def get_session() -> requests.Session:
     """
     Return a requests Session pre-configured with the crawler's
-    User-Agent header.
+    User-Agent header and an exponential-backoff retry adapter.
 
     Always use this instead of requests.get() directly so every
     outbound request identifies itself consistently.
@@ -28,6 +38,9 @@ def get_session() -> requests.Session:
     session.headers.update({
         "User-Agent": settings.CRAWLER["USER_AGENT"],
     })
+    adapter = HTTPAdapter(max_retries=_RETRY_STRATEGY)
+    session.mount("https://", adapter)
+    session.mount("http://",  adapter)
     return session
 
 

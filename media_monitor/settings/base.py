@@ -1,23 +1,41 @@
 """
-Django settings for media_monitor project.
+media_monitor/settings/base.py
+────────────────────────────────
+Shared settings for all environments.
+
+Environment-specific files (development, production, testing) import this
+module AFTER loading their env source (os.environ / .env file), so all
+env() calls here resolve correctly at import time.
 """
 import environ
 from pathlib import Path
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.celery import CeleryIntegration
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# ── Environment ───────────────────────────────────────────────────────────────
 env = environ.Env(
-    DEBUG=(bool, True),
-    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
+    DEBUG=(bool, False),
+    ALLOWED_HOSTS=(list, []),
+    SENTRY_DSN=(str, ""),
+    MEDIA_MONITOR_WEBHOOK_SECRET=(str, ""),
 )
-environ.Env.read_env(BASE_DIR / ".env")
 
 # ── Core ──────────────────────────────────────────────────────────────────────
-SECRET_KEY = env("SECRET_KEY", default="django-insecure-local-dev-key-change-me")
-DEBUG       = env("DEBUG")
+SECRET_KEY    = env("SECRET_KEY", default="django-insecure-local-dev-key-change-me")
+DEBUG         = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+
+# ── Sentry ────────────────────────────────────────────────────────────────────
+_SENTRY_DSN = env("SENTRY_DSN")
+if _SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[DjangoIntegration(), CeleryIntegration()],
+        traces_sample_rate=0.2,
+        send_default_pii=False,
+    )
 
 # ── Apps ──────────────────────────────────────────────────────────────────────
 DJANGO_APPS = [
@@ -130,45 +148,33 @@ LOGGING = {
 
 # ── Crawler ───────────────────────────────────────────────────────────────────
 CRAWLER = {
-    # Seconds before a request is abandoned
-    "REQUEST_TIMEOUT": env.int("CRAWLER_TIMEOUT", default=15),
-
-    # User-Agent sent with every outbound request
-    "USER_AGENT": env(
-        "CRAWLER_USER_AGENT",
-        default="MediaMonitorBot/1.0 (+https://yoursite.com/bot)",
-    ),
-
-    # Max <a href> links to collect per page (link-extraction mode)
-    "MAX_LINKS_PER_PAGE": env.int("MAX_LINKS_PER_PAGE", default=50),
-
-    # Seconds to wait between requests to the same domain
-    "POLITENESS_DELAY": env.float("POLITENESS_DELAY", default=1.0),
-
-    # Optional third-party Search API keys
-    "BING_API_KEY":        env("BING_API_KEY",        default=""),
-    "GOOGLE_NEWS_API_KEY": env("GOOGLE_NEWS_API_KEY", default=""),
-    "GOOGLE_CSE_ID":       env("GOOGLE_CSE_ID",       default=""),
+    "REQUEST_TIMEOUT":    env.int("CRAWLER_TIMEOUT",     default=15),
+    "USER_AGENT":         env("CRAWLER_USER_AGENT",      default="MediaMonitorBot/1.0 (+https://yoursite.com/bot)"),
+    "MAX_LINKS_PER_PAGE": env.int("MAX_LINKS_PER_PAGE",  default=50),
+    "POLITENESS_DELAY":   env.float("POLITENESS_DELAY",  default=1.0),
+    "BING_API_KEY":       env("BING_API_KEY",            default=""),
+    "GOOGLE_NEWS_API_KEY":env("GOOGLE_NEWS_API_KEY",     default=""),
+    "GOOGLE_CSE_ID":      env("GOOGLE_CSE_ID",           default=""),
 }
 
 # ── Elasticsearch ─────────────────────────────────────────────────────────────
 ELASTICSEARCH = {
-    "HOSTS":   [env("ELASTICSEARCH_URL",     default="http://localhost:9200")],
-    "INDEX":   env("ELASTICSEARCH_INDEX",    default="articles"),
+    "HOSTS":   [env("ELASTICSEARCH_URL",      default="http://localhost:9200")],
+    "INDEX":   env("ELASTICSEARCH_INDEX",     default="articles"),
     "TIMEOUT": env.int("ELASTICSEARCH_TIMEOUT", default=10),
 }
 
 # ── Celery ────────────────────────────────────────────────────────────────────
-CELERY_BROKER_URL          = env("REDIS_URL", default="redis://localhost:6379/0")
-CELERY_RESULT_BACKEND      = "django-db"
-CELERY_ACCEPT_CONTENT      = ["json"]
-CELERY_TASK_SERIALIZER     = "json"
-CELERY_RESULT_SERIALIZER   = "json"
-CELERY_TIMEZONE            = "UTC"
-CELERY_BEAT_SCHEDULER      = "django_celery_beat.schedulers:DatabaseScheduler"
-CELERY_TASK_TRACK_STARTED  = True
-CELERY_TASK_TIME_LIMIT     = 300   # hard kill after 5 minutes
-CELERY_TASK_SOFT_TIME_LIMIT = 240  # raises SoftTimeLimitExceeded after 4 minutes
+CELERY_BROKER_URL           = env("REDIS_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND       = "django-db"
+CELERY_ACCEPT_CONTENT       = ["json"]
+CELERY_TASK_SERIALIZER      = "json"
+CELERY_RESULT_SERIALIZER    = "json"
+CELERY_TIMEZONE             = "UTC"
+CELERY_BEAT_SCHEDULER       = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_TASK_TRACK_STARTED   = True
+CELERY_TASK_TIME_LIMIT      = 300
+CELERY_TASK_SOFT_TIME_LIMIT = 240
 
 # ── Email ─────────────────────────────────────────────────────────────────────
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="alerts@mediamonitor.local")
@@ -176,6 +182,9 @@ EMAIL_BACKEND      = env(
     "EMAIL_BACKEND",
     default="django.core.mail.backends.console.EmailBackend",
 )
+
+# ── Integration ───────────────────────────────────────────────────────────────
+MEDIA_MONITOR_WEBHOOK_SECRET = env("MEDIA_MONITOR_WEBHOOK_SECRET")
 
 # ── Django REST Framework ─────────────────────────────────────────────────────
 REST_FRAMEWORK = {
