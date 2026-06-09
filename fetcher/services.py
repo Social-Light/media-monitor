@@ -45,6 +45,7 @@ from alerts.matching import check_alerts
 from alerts.notifications import dispatch_notifications
 from matching.matcher import match_article
 from fetcher.bridge import push_competitor_to_platform, push_to_platform
+from fetcher.platform_alerts import notify_for_article
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +232,10 @@ def parse_page(fetched_page):
 
     try:
         if not parsed_article.is_duplicate:
-            push_to_platform(parsed_article)
+            online_articles = push_to_platform(parsed_article)
             push_competitor_to_platform(parsed_article)
+            for online_article in online_articles:
+                notify_for_article(online_article)
     except Exception as exc:
         logger.warning("Platform bridge failed for %s: %s", url, exc)
 
