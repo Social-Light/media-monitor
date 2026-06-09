@@ -43,6 +43,8 @@ from fetcher.playwright_fetcher import render_page
 from fetcher.search import index_article
 from alerts.matching import check_alerts
 from alerts.notifications import dispatch_notifications
+from matching.matcher import match_article
+from fetcher.bridge import push_competitor_to_platform, push_to_platform
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +222,19 @@ def parse_page(fetched_page):
                 dispatch_notifications(match)
     except Exception as exc:
         logger.warning("Alert matching failed for %s: %s", url, exc)
+
+    try:
+        if not parsed_article.is_duplicate:
+            match_article(parsed_article)
+    except Exception as exc:
+        logger.warning("Organisation matching failed for %s: %s", url, exc)
+
+    try:
+        if not parsed_article.is_duplicate:
+            push_to_platform(parsed_article)
+            push_competitor_to_platform(parsed_article)
+    except Exception as exc:
+        logger.warning("Platform bridge failed for %s: %s", url, exc)
 
     fetched_page.discovered_url.status = URLStatusChoices.PARSED
     fetched_page.discovered_url.error_message = ""

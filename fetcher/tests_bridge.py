@@ -1,0 +1,248 @@
+"""
+fetcher/tests_bridge.py
+
+Tests for the platform bridge (fetcher/bridge.py).
+
+These run against the local SQLite test DB (PLATFORM_INTEGRATED=False → the
+platform_sync models are managed locally), creating real Organization, Keyword
+and Competitor rows, then asserting OnlineArticle / CompetitorArticle records.
+"""
+from unittest.mock import MagicMock, patch
+
+from django.test import TestCase
+
+import fetcher.services  # imported before any patch("fetcher.services.*") calls
+
+from discovery.models import DiscoveredURL, SeedSource
+from fetcher.bridge import (
+    _match_terms,
+    _resolve_sentiment,
+    push_competitor_to_platform,
+    push_to_platform,
+)
+from fetcher.models import FetchedPage, ParsedArticle
+from platform_sync.models import (
+    CompetitorArticle,
+    Competitor,
+    Keyword,
+    OnlineArticle,
+    Organization,
+)
+
+_counter = 0
+
+
+def _uid():
+    global _counter
+    _counter += 1
+    return _counter
+
+
+def make_article(**kwargs):
+    uid = _uid()
+    seed = SeedSource.objects.create(
+        name=f"Seed {uid}", url=f"https://example.com/feed/{uid}", source_type="rss",
+    )
+    durl = DiscoveredURL.objects.create(
+        seed=seed, url=kwargs.get("url", f"https://example.com/article/{uid}"), status="parsed",
+    )
+    page = FetchedPage.objects.create(
+        discovered_url=durl, status_code=200, raw_html="<html></html>",
+    )
+    return ParsedArticle.objects.create(
+        fetched_page=page,
+        title=kwargs.get("title", "Debswana posts record diamond output"),
+        body_text=kwargs.get("body_text", "The company expanded its operations this year."),
+        summary=kwargs.get("summary", "A short summary."),
+        source_domain=kwargs.get("source_domain", "mmegi.bw"),
+        country=kwargs.get("country", "Botswana"),
+        published_at=kwargs.get("published_at", None),
+        signals=kwargs.get("signals", {"sentiment": "positive"}),
+        is_duplicate=kwargs.get("is_duplicate", False),
+    )
+
+
+def make_org(name=None, status="active", keywords=(), competitors=()):
+    org = Organization.objects.create(name=name or f"Org {_uid()}", status=status)
+    for kw in keywords:
+        Keyword.objects.create(organization=org, keyword=kw)
+    for comp_name, aliases in competitors:
+        Competitor.objects.create(organization=org, name=comp_name, aliases=aliases)
+    return org
+
+
+# ── Pure helpers ──────────────────────────────────────────────────────────────
+
+class HelperTests(TestCase):
+    def test_match_terms_title_scores_one(self):
+        matched, rel = _match_terms(["Debswana"], "debswana wins award", "body text")
+        self.assertEqual(matched, ["Debswana"])
+        self.assertEqual(rel, 1.0)
+
+    def test_match_terms_body_scores_half(self):
+        matched, rel = _match_terms(["Debswana"], "mining news", "debswana expands")
+        self.assertEqual(rel, 0.5)
+
+    def test_match_terms_no_match(self):
+        self.assertEqual(_match_terms(["copper"], "gold news", "gold body"), ([], 0.0))
+
+    def test_resolve_sentiment_from_signals(self):
+        art = MagicMock(signals={"sentiment": "negative"})
+        self.assertEqual(_resolve_sentiment(art), "negative")
+
+    def test_resolve_sentiment_defaults_neutral(self):
+        self.assertEqual(_resolve_sentiment(MagicMock(signals={})), "neutral")
+        self.assertEqual(_resolve_sentiment(MagicMock(signals={"sentiment": "bogus"})), "neutral")
+
+
+# ── push_to_platform ──────────────────────────────────────────────────────────
+
+class PushToPlatformTests(TestCase):
+
+    def test_creates_online_article_on_title_match(self):
+        org = make_org(name="Debswana", keywords=["Debswana"])
+        article = make_article(title="Debswana posts record output")
+        created = push_to_platform(article)
+
+        self.assertEqual(len(created), 1)
+        oa = OnlineArticle.objects.get(organization=org)
+        self.assertEqual(oa.headline, "Debswana posts record output")
+        self.assertEqual(oa.relevancy, 1.0)
+        self.assertEqual(oa.coverage, "Earned")
+        self.assertEqual(oa.sentiment, "positive")
+        self.assertEqual(oa.source, "mmegi.bw")
+        self.assertEqual(oa.url, article.url)
+
+    def test_body_match_sets_half_relevancy(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        article = make_article(title="Mining sector update", body_text="Debswana expanded output.")
+        push_to_platform(article)
+        self.assertEqual(OnlineArticle.objects.get().relevancy, 0.5)
+
+    def test_no_match_creates_nothing(self):
+        make_org(name="BCL", keywords=["copper"])
+        push_to_platform(make_article(title="Diamond news", body_text="no relevant terms"))
+        self.assertEqual(OnlineArticle.objects.count(), 0)
+
+    def test_inactive_org_skipped(self):
+        make_org(name="Debswana", status="inactive", keywords=["Debswana"])
+        push_to_platform(make_article(title="Debswana output"))
+        self.assertEqual(OnlineArticle.objects.count(), 0)
+
+    def test_sentiment_defaults_neutral_when_missing(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        push_to_platform(make_article(title="Debswana output", signals={}))
+        self.assertEqual(OnlineArticle.objects.get().sentiment, "neutral")
+
+    def test_published_date_falls_back_to_today(self):
+        from django.utils import timezone
+        make_org(name="Debswana", keywords=["Debswana"])
+        push_to_platform(make_article(title="Debswana output", published_at=None))
+        self.assertEqual(OnlineArticle.objects.get().date_published, timezone.now().date())
+
+    def test_duplicate_not_created_for_same_org_and_url(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        article = make_article(title="Debswana output")
+        push_to_platform(article)
+        push_to_platform(article)  # second pass
+        self.assertEqual(OnlineArticle.objects.count(), 1)
+
+    def test_multiple_orgs_each_get_article(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        make_org(name="Diamond Co", keywords=["diamond"])
+        push_to_platform(make_article(title="Debswana diamond output"))
+        self.assertEqual(OnlineArticle.objects.count(), 2)
+
+
+# ── push_competitor_to_platform ───────────────────────────────────────────────
+
+class PushCompetitorTests(TestCase):
+
+    def test_creates_competitor_article_on_name_match(self):
+        org = make_org(name="Debswana", competitors=[("Lucara", "")])
+        article = make_article(title="Lucara unveils large diamond")
+        created = push_competitor_to_platform(article)
+
+        self.assertEqual(len(created), 1)
+        ca = CompetitorArticle.objects.get()
+        self.assertEqual(ca.organization, org)
+        self.assertEqual(ca.company_name, "Lucara")
+        self.assertEqual(ca.matched_keywords, "Lucara")
+        self.assertEqual(ca.sentiment, "positive")
+
+    def test_matches_on_alias(self):
+        make_org(name="Debswana", competitors=[("Lucara Diamond Corp", "Lucara, LDC")])
+        push_competitor_to_platform(make_article(title="LDC reports strong quarter"))
+        ca = CompetitorArticle.objects.get()
+        self.assertIn("LDC", ca.matched_keywords)
+
+    def test_no_match_creates_nothing(self):
+        make_org(name="Debswana", competitors=[("Lucara", "")])
+        push_competitor_to_platform(make_article(title="Unrelated headline", body_text="nothing"))
+        self.assertEqual(CompetitorArticle.objects.count(), 0)
+
+    def test_duplicate_not_created(self):
+        make_org(name="Debswana", competitors=[("Lucara", "")])
+        article = make_article(title="Lucara news")
+        push_competitor_to_platform(article)
+        push_competitor_to_platform(article)
+        self.assertEqual(CompetitorArticle.objects.count(), 1)
+
+    def test_inactive_org_competitor_skipped(self):
+        make_org(name="Debswana", status="inactive", competitors=[("Lucara", "")])
+        push_competitor_to_platform(make_article(title="Lucara news"))
+        self.assertEqual(CompetitorArticle.objects.count(), 0)
+
+
+# ── parse_page integration ─────────────────────────────────────────────────────
+
+class ParsePageBridgeIntegrationTests(TestCase):
+    """parse_page() should push to the platform after a successful parse."""
+
+    def _run_parse(self, title="Debswana output", body="Debswana expanded.", is_duplicate=False):
+        import newspaper
+        seed = SeedSource.objects.create(
+            name=f"Seed {_uid()}", url=f"https://example.com/feed/{_uid()}", source_type="rss",
+        )
+        durl = DiscoveredURL.objects.create(
+            seed=seed, url=f"https://example.com/article/{_uid()}", status="fetched",
+        )
+        page = FetchedPage.objects.create(
+            discovered_url=durl, status_code=200, raw_html=f"<html><body>{body}</body></html>",
+        )
+
+        mock_article = MagicMock(spec=newspaper.Article)
+        mock_article.title = title
+        mock_article.text = body
+        mock_article.authors = []
+        mock_article.publish_date = None
+        mock_article.meta_lang = "en"
+        mock_article.meta_keywords = ""
+        mock_article.meta_description = ""
+        mock_article.tags = set()
+
+        with patch("fetcher.services.newspaper.Article", return_value=mock_article), \
+             patch("fetcher.services.get_rule_for_page", return_value=None), \
+             patch("fetcher.services.run_nlp", return_value={"sentiment": "positive"}), \
+             patch("fetcher.services.check_and_mark_duplicate",
+                   side_effect=lambda a: setattr(a, "is_duplicate", is_duplicate)), \
+             patch("fetcher.services.index_article"):
+            from fetcher.services import parse_page
+            return parse_page(page)
+
+    def test_parse_creates_online_article(self):
+        org = make_org(name="Debswana", keywords=["Debswana"])
+        self._run_parse(title="Debswana output")
+        self.assertTrue(OnlineArticle.objects.filter(organization=org).exists())
+
+    def test_duplicate_article_not_pushed(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        self._run_parse(title="Debswana output", is_duplicate=True)
+        self.assertEqual(OnlineArticle.objects.count(), 0)
+
+    def test_parse_survives_bridge_error(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        with patch("fetcher.services.push_to_platform", side_effect=Exception("platform down")):
+            result = self._run_parse(title="Debswana output")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.title, "Debswana output")

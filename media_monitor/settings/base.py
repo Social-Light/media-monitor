@@ -60,6 +60,8 @@ PROJECT_APPS: list[str] = [
     "api",
     "dashboard",
     "alerts",
+    "matching",
+    "platform_sync",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
@@ -102,6 +104,13 @@ DATABASES = {
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
     )
 }
+
+# ── Platform integration ────────────────────────────────────────────────────────
+# False → standalone: platform_sync models are managed locally in the default DB.
+# True  → integrated: platform_sync models are unmanaged and routed to the shared
+#         'platform' database (configured in settings/production.py).
+PLATFORM_INTEGRATED = env.bool("PLATFORM_INTEGRATED", default=False)
+DATABASE_ROUTERS = ["platform_sync.routers.PlatformRouter"]
 
 # ── Password validation ───────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
