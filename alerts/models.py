@@ -112,3 +112,42 @@ class AlertMatch(TimeStampedModel):
 
     def __str__(self):
         return f"{self.alert.name} → {self.article.title[:60]}"
+
+
+class PlatformAlertNotification(TimeStampedModel):
+    """
+    Dedup + audit record for notifications fired off the *platform's* Alert model
+    (platform_sync.Alert / monitor_alert) when the crawler captures matching
+    coverage.
+
+    This lives in the crawler's own database (NOT the platform DB) because the
+    platform's schema is read-only to us — we can't add a "sent" table there.
+    It references the platform Alert and OnlineArticle by their integer PKs
+    (no cross-database ForeignKey).
+    """
+
+    alert_id = models.IntegerField(
+        db_index=True, help_text="PK of the platform_sync.Alert (monitor_alert)."
+    )
+    article_id = models.IntegerField(
+        help_text="PK of the platform_sync.OnlineArticle that triggered this."
+    )
+    organization_id = models.CharField(
+        max_length=64, blank=True, help_text="Platform Organization UUID (for reference)."
+    )
+    alert_name = models.CharField(max_length=200, blank=True)
+    recipient = models.EmailField(blank=True)
+    matched_keywords = models.JSONField(default=list)
+    frequency = models.CharField(max_length=20, blank=True)
+    sent = models.BooleanField(default=False, db_index=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = [["alert_id", "article_id"]]
+        verbose_name = "Platform Alert Notification"
+        verbose_name_plural = "Platform Alert Notifications"
+
+    def __str__(self):
+        state = "sent" if self.sent else "pending"
+        return f"alert#{self.alert_id} article#{self.article_id} ({state})"

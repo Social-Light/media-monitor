@@ -51,6 +51,7 @@ THIRD_PARTY_APPS: list[str] = [
     "django_celery_beat",
     "django_celery_results",
     "rest_framework",
+    "anymail",
 ]
 
 PROJECT_APPS: list[str] = [
@@ -187,10 +188,27 @@ CELERY_TASK_SOFT_TIME_LIMIT = 240
 
 # ── Email ─────────────────────────────────────────────────────────────────────
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="alerts@mediamonitor.local")
+# Backend is env-driven. Defaults to console (dev/tests). In production set:
+#   EMAIL_BACKEND=anymail.backends.resend.EmailBackend   (Resend via Anymail, preferred)
+# An SMTP fallback (django.core.mail.backends.smtp.EmailBackend) is also supported
+# via the EMAIL_HOST_* settings below.
 EMAIL_BACKEND      = env(
     "EMAIL_BACKEND",
     default="django.core.mail.backends.console.EmailBackend",
 )
+
+# Anymail — Resend ESP. Used when EMAIL_BACKEND is the Anymail Resend backend.
+ANYMAIL = {
+    "RESEND_API_KEY": env("RESEND_API_KEY", default=""),
+}
+
+# SMTP fallback config — used only when EMAIL_BACKEND is the SMTP backend.
+# Harmless defaults for the console/Anymail backends and tests.
+EMAIL_HOST          = env("EMAIL_HOST",          default="")
+EMAIL_PORT          = env.int("EMAIL_PORT",      default=587)
+EMAIL_HOST_USER     = env("EMAIL_HOST_USER",     default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS       = env.bool("EMAIL_USE_TLS",  default=True)
 
 # ── Integration ───────────────────────────────────────────────────────────────
 MEDIA_MONITOR_WEBHOOK_SECRET = env("MEDIA_MONITOR_WEBHOOK_SECRET")
