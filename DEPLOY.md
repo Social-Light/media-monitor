@@ -13,7 +13,8 @@ The app is **not** a single process. A working deployment needs:
 | Web (WSGI)         | `gunicorn media_monitor.wsgi:application --bind 0.0.0.0:8000`            | Serves dashboard + API. |
 | Celery worker      | `celery -A media_monitor worker -l info`                                | Does the actual discovery + fetching + parsing. |
 | Celery beat        | `celery -A media_monitor beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler` | Triggers periodic discovery. |
-| PostgreSQL         | managed service or container                                            | Set `DATABASE_URL`. |
+| PostgreSQL (crawler) | managed service or container                                          | Crawler's own data. Set `DATABASE_URL`. |
+| PostgreSQL (platform) | the shared platform database                                         | Only when `PLATFORM_INTEGRATED=True`. Set `PLATFORM_DB_URL`. See "Platform integration". |
 | Redis              | managed service or container                                            | Celery broker — set `REDIS_URL`. |
 | Elasticsearch      | optional                                                                | Search/indexing degrade gracefully if absent. |
 
@@ -29,6 +30,8 @@ cd media-monitor
 # 1. Environment
 cp .env.example .env
 # …edit .env: real SECRET_KEY, ALLOWED_HOSTS, DATABASE_URL, REDIS_URL, etc.
+# For platform integration also set PLATFORM_INTEGRATED=True and PLATFORM_DB_URL
+# (production.py forces PLATFORM_INTEGRATED=True). See "Platform integration" below.
 
 # 2. Dependencies (inside your venv / image)
 pip install -r requirements.txt
@@ -61,6 +64,41 @@ Selected via `DJANGO_SETTINGS_MODULE`:
 - `media_monitor.settings.testing` — CI / `manage.py test`.
 
 `wsgi.py` / `asgi.py` default to production; `manage.py` defaults to development.
+
+## Platform integration
+
+The crawler can push parsed coverage into the external media-monitoring platform
+(the `socialmonitor` project). This is controlled by `PLATFORM_INTEGRATED`:
+
+- **Dev/CI (`PLATFORM_INTEGRATED=False`)** — the `platform_sync` models are
+  `managed=True` and live in the crawler's own DB. `migrate` builds local
+  `monitor_*` tables; no second database is needed.
+- **Production (`PLATFORM_INTEGRATED=True`, forced by production.py)** — the
+  `platform_sync` models are `managed=False` and are routed to a **second
+  database** (`PLATFORM_DB_URL`) that is the *shared platform PostgreSQL*. The
+  crawler reads `Organization`/`Keyword`/`Competitor` and writes
+  `OnlineArticle`/`CompetitorArticle` there.
+
+Critical operational rules for production:
+
+1. **The crawler never migrates the platform DB.** Its router refuses to migrate
+   `platform_sync` anywhere and keeps crawler/built-in tables out of the platform
+   DB. `python manage.py migrate` only touches the crawler's `default` DB — run
+   it exactly as in standalone mode.
+2. **The `monitor_*` tables must already exist** in the shared DB (created by the
+   platform's own migrations) before you enable integration, or writes will fail.
+3. **Organisations, keywords and competitors are owned by the platform.** Any
+   such records created in local dev SQLite are dev-only and do NOT transfer; in
+   production the bridge matches against whatever the platform DB contains.
+4. The bridge is wrapped in try/except in `parse_page()`, so a platform outage
+   degrades gracefully — parsing continues, coverage is simply not pushed.
+
+Verify routing on the server without writing anything:
+
+```bash
+python manage.py shell -c "from django.db import router; from platform_sync.models import OnlineArticle; print(router.db_for_write(OnlineArticle), OnlineArticle._meta.managed)"
+# expect: platform False
+```
 
 ## Loading seeds
 

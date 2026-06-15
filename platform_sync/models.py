@@ -64,13 +64,6 @@ KEYWORD_CATEGORY_CHOICES = [
     ("campaign", "Campaigns"),
 ]
 
-ALERT_FREQUENCY_CHOICES = [
-    ("immediate", "Immediate"),
-    ("daily", "Daily"),
-    ("weekly", "Weekly"),
-    ("monthly", "Monthly"),
-]
-
 
 class Organization(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -224,34 +217,3 @@ class OnlineArticle(models.Model):
         managed = PLATFORM_MANAGED
         db_table = "monitor_onlinearticle"
         ordering = ["-date_published", "-created_at"]
-
-
-class Alert(models.Model):
-    """Per-organisation keyword alert defined in the platform. The crawler reads
-    these to notify when it captures matching coverage (see fetcher/platform_alerts.py)."""
-
-    organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="alerts"
-    )
-    name = models.CharField(max_length=200)
-    keywords = models.TextField(blank=True, help_text="Comma-separated keywords")
-    email = models.EmailField(blank=True)
-    frequency = models.CharField(
-        max_length=20, choices=ALERT_FREQUENCY_CHOICES, default="daily"
-    )
-    email_subject = models.CharField(max_length=300, blank=True)
-    start_date = models.DateField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.name
-
-    def keyword_list(self) -> list:
-        """Cleaned, lowercased keyword terms (empty list = match all coverage)."""
-        return [k.strip().lower() for k in (self.keywords or "").split(",") if k.strip()]
-
-    class Meta:
-        managed = PLATFORM_MANAGED
-        db_table = "monitor_alert"
-        ordering = ["name"]
