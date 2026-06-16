@@ -17,14 +17,19 @@ Routing/DB selection is transparent: in production these models are routed to th
 shared 'platform' database; in dev/test they live in the default DB. See
 platform_sync.routers.PlatformRouter.
 
-Matching mirrors the crawler's own organisation matcher: a term found in the
-title scores higher (relevancy 1.0) than one found only in the body (0.5).
+Capture decision: an article is linked to an org when one of its tracked terms
+appears in the title or body (case-insensitive). The stored relevancy, however,
+is computed with the platform's own 0–100 scorer (fetcher/relevancy.py, vendored
+from monitor/relevancy.py) over the headline + summary — so crawler-written
+coverage ranks identically to coverage the platform ingests itself.
+
 Existing coverage is never duplicated — (organization, url) is checked first.
 """
 import logging
 
 from django.utils import timezone
 
+from fetcher.relevancy import compute_relevancy
 from platform_sync.models import (
     CompetitorArticle,
     OnlineArticle,
@@ -34,9 +39,6 @@ from platform_sync.models import (
 logger = logging.getLogger(__name__)
 
 VALID_SENTIMENTS = {"positive", "negative", "neutral", "mixed"}
-
-RELEVANCY_TITLE = 1.0
-RELEVANCY_BODY = 0.5
 
 
 def _resolve_sentiment(parsed_article) -> str:
@@ -51,28 +53,14 @@ def _published_date(parsed_article):
     return published.date() if published else timezone.now().date()
 
 
-def _match_terms(terms, title: str, body: str):
-    """
-    Match a list of terms against the (already lowercased) title and body.
-
-    Returns (matched_terms, relevancy):
-      - matched_terms: the original-cased terms found anywhere
-      - relevancy: 1.0 if any term is in the title, else 0.5 if only in the body,
-        else 0.0 when nothing matched (matched_terms empty).
-    """
-    matched, in_title = [], False
+def _matched_terms(terms, title: str, body: str) -> list:
+    """Return the original-cased terms found (case-insensitively) in title or body."""
+    matched = []
     for term in terms:
         needle = term.strip().lower()
-        if not needle:
-            continue
-        if needle in title:
+        if needle and (needle in title or needle in body):
             matched.append(term)
-            in_title = True
-        elif needle in body:
-            matched.append(term)
-    if not matched:
-        return [], 0.0
-    return matched, (RELEVANCY_TITLE if in_title else RELEVANCY_BODY)
+    return matched
 
 
 def push_to_platform(parsed_article) -> list:
@@ -94,13 +82,22 @@ def push_to_platform(parsed_article) -> list:
     country = (parsed_article.country or "")[:100]
 
     for org in Organization.objects.filter(status="active"):
-        terms = [kw.keyword for kw in org.keywords.all()]
-        matched, relevancy = _match_terms(terms, title, body)
+        keywords = list(org.keywords.all())
+        matched = _matched_terms([kw.keyword for kw in keywords], title, body)
         if not matched:
             continue
 
         if OnlineArticle.objects.filter(organization=org, url=url).exists():
             continue
+
+        # Score on headline + summary with the platform's own 0–100 scorer so
+        # crawler coverage ranks like platform-ingested coverage. Competitors
+        # count toward relevancy too (a competitor mention is relevant coverage).
+        competitors = list(org.competitors.all())
+        relevancy = compute_relevancy(
+            parsed_article.title, parsed_article.summary,
+            keywords=keywords, competitors=competitors,
+        )
 
         article = OnlineArticle.objects.create(
             organization=org,
@@ -115,7 +112,7 @@ def push_to_platform(parsed_article) -> list:
             relevancy=relevancy,
         )
         logger.info(
-            "Bridge: OnlineArticle for org '%s' from %s (relevancy=%.1f, terms=%s)",
+            "Bridge: OnlineArticle for org '%s' from %s (relevancy=%.2f, terms=%s)",
             org.name, url, relevancy, matched,
         )
         created.append(article)
@@ -143,7 +140,7 @@ def push_competitor_to_platform(parsed_article) -> list:
 
     for org in Organization.objects.filter(status="active"):
         for competitor in org.competitors.all():
-            matched, _ = _match_terms(competitor.match_terms(), title, body)
+            matched = _matched_terms(competitor.match_terms(), title, body)
             if not matched:
                 continue
 

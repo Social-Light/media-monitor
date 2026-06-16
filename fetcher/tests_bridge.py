@@ -15,7 +15,7 @@ import fetcher.services  # imported before any patch("fetcher.services.*") calls
 
 from discovery.models import DiscoveredURL, SeedSource
 from fetcher.bridge import (
-    _match_terms,
+    _matched_terms,
     _resolve_sentiment,
     push_competitor_to_platform,
     push_to_platform,
@@ -74,17 +74,14 @@ def make_org(name=None, status="active", keywords=(), competitors=()):
 # ── Pure helpers ──────────────────────────────────────────────────────────────
 
 class HelperTests(TestCase):
-    def test_match_terms_title_scores_one(self):
-        matched, rel = _match_terms(["Debswana"], "debswana wins award", "body text")
-        self.assertEqual(matched, ["Debswana"])
-        self.assertEqual(rel, 1.0)
+    def test_matched_terms_finds_in_title(self):
+        self.assertEqual(_matched_terms(["Debswana"], "debswana wins award", "body"), ["Debswana"])
 
-    def test_match_terms_body_scores_half(self):
-        matched, rel = _match_terms(["Debswana"], "mining news", "debswana expands")
-        self.assertEqual(rel, 0.5)
+    def test_matched_terms_finds_in_body(self):
+        self.assertEqual(_matched_terms(["Debswana"], "mining news", "debswana expands"), ["Debswana"])
 
-    def test_match_terms_no_match(self):
-        self.assertEqual(_match_terms(["copper"], "gold news", "gold body"), ([], 0.0))
+    def test_matched_terms_no_match(self):
+        self.assertEqual(_matched_terms(["copper"], "gold news", "gold body"), [])
 
     def test_resolve_sentiment_from_signals(self):
         art = MagicMock(signals={"sentiment": "negative"})
@@ -107,17 +104,27 @@ class PushToPlatformTests(TestCase):
         self.assertEqual(len(created), 1)
         oa = OnlineArticle.objects.get(organization=org)
         self.assertEqual(oa.headline, "Debswana posts record output")
-        self.assertEqual(oa.relevancy, 1.0)
+        self.assertEqual(oa.relevancy, 50.0)   # brand keyword in headline → 0–100 scorer
         self.assertEqual(oa.coverage, "Earned")
         self.assertEqual(oa.sentiment, "positive")
         self.assertEqual(oa.source, "mmegi.bw")
         self.assertEqual(oa.url, article.url)
 
-    def test_body_match_sets_half_relevancy(self):
+    def test_body_only_match_is_captured_but_scores_zero(self):
+        # Captured (keyword in body) but relevancy is scored on headline+summary
+        # only — matching the platform — so a body-only mention scores 0.
         make_org(name="Debswana", keywords=["Debswana"])
         article = make_article(title="Mining sector update", body_text="Debswana expanded output.")
         push_to_platform(article)
-        self.assertEqual(OnlineArticle.objects.get().relevancy, 0.5)
+        oa = OnlineArticle.objects.get()
+        self.assertEqual(oa.relevancy, 0.0)
+
+    def test_relevancy_uses_category_weight_and_repeat_bonus(self):
+        # 'Debswana' (brand=50) appears twice in headline+summary → 50 + 0.1*50 = 55.
+        make_org(name="Debswana", keywords=["Debswana"])
+        article = make_article(title="Debswana wins", summary="Debswana again")
+        push_to_platform(article)
+        self.assertEqual(OnlineArticle.objects.get().relevancy, 55.0)
 
     def test_no_match_creates_nothing(self):
         make_org(name="BCL", keywords=["copper"])
