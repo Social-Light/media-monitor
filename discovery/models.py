@@ -28,6 +28,7 @@ class SourceType(models.TextChoices):
     SITEMAP    = "sitemap",    "XML Sitemap"
     SEED_URL   = "seed_url",   "Seed URL (link extraction)"
     SEARCH_API = "search_api", "Search API (Bing / Google)"
+    SOCIAL     = "social",     "Social Media (Apify)"
     MANUAL     = "manual",     "Manually Added"
 
 

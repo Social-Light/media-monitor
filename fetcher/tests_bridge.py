@@ -18,6 +18,7 @@ from fetcher.bridge import (
     _matched_terms,
     _resolve_sentiment,
     push_competitor_to_platform,
+    push_social_to_platform,
     push_to_platform,
 )
 from fetcher.models import FetchedPage, ParsedArticle
@@ -27,6 +28,7 @@ from platform_sync.models import (
     Keyword,
     OnlineArticle,
     Organization,
+    SocialMediaPost,
 )
 
 _counter = 0
@@ -206,23 +208,31 @@ class PushCompetitorTests(TestCase):
 class ParsePageBridgeIntegrationTests(TestCase):
     """parse_page() should push to the platform after a successful parse."""
 
-    def _run_parse(self, title="Debswana output", body="Debswana expanded.", is_duplicate=False):
+    def _run_parse(self, title="Debswana output", body="Debswana expanded.",
+                   is_duplicate=False, url=None, publish_date="now"):
         import newspaper
+        from django.utils import timezone
+        if publish_date == "now":
+            publish_date = timezone.now()
         seed = SeedSource.objects.create(
             name=f"Seed {_uid()}", url=f"https://example.com/feed/{_uid()}", source_type="rss",
         )
         durl = DiscoveredURL.objects.create(
-            seed=seed, url=f"https://example.com/article/{_uid()}", status="fetched",
+            seed=seed, url=url or f"https://example.com/article/{_uid()}", status="fetched",
         )
         page = FetchedPage.objects.create(
             discovered_url=durl, status_code=200, raw_html=f"<html><body>{body}</body></html>",
         )
 
+        from django.utils import timezone
+
         mock_article = MagicMock(spec=newspaper.Article)
         mock_article.title = title
         mock_article.text = body
         mock_article.authors = []
-        mock_article.publish_date = None
+        # Current-month date + the '/article/' URL path → passes the news filter
+        # (fetcher/news_filter.py) so the bridge actually fires.
+        mock_article.publish_date = publish_date
         mock_article.meta_lang = "en"
         mock_article.meta_keywords = ""
         mock_article.meta_description = ""
@@ -247,9 +257,82 @@ class ParsePageBridgeIntegrationTests(TestCase):
         self._run_parse(title="Debswana output", is_duplicate=True)
         self.assertEqual(OnlineArticle.objects.count(), 0)
 
+    def test_product_page_not_pushed(self):
+        # Corporate product page (no news path) → news filter skips the bridge.
+        make_org(name="Debswana", keywords=["Debswana"])
+        self._run_parse(
+            title="Debswana Personal Loan",
+            url="https://www.example.com/personal/loans/debswana-loan",
+        )
+        self.assertEqual(OnlineArticle.objects.count(), 0)
+
+    def test_old_dated_article_not_pushed(self):
+        # A news-path page but published outside the current month → skipped.
+        from datetime import timedelta
+        from django.utils import timezone
+        make_org(name="Debswana", keywords=["Debswana"])
+        self._run_parse(
+            title="Debswana output",
+            url="https://www.example.com/news/debswana-output",
+            publish_date=timezone.now() - timedelta(days=70),
+        )
+        self.assertEqual(OnlineArticle.objects.count(), 0)
+
     def test_parse_survives_bridge_error(self):
         make_org(name="Debswana", keywords=["Debswana"])
         with patch("fetcher.services.push_to_platform", side_effect=Exception("platform down")):
             result = self._run_parse(title="Debswana output")
         self.assertIsNotNone(result)
         self.assertEqual(result.title, "Debswana output")
+
+
+# ── push_social_to_platform ─────────────────────────────────────────────────────
+
+class PushSocialToPlatformTests(TestCase):
+    def test_creates_socialmediapost_on_keyword_match(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        art = make_article(
+            title="Debswana wins award",
+            signals={"sentiment": "positive", "platform": "linkedin",
+                     "followers": 29828, "engagement": {"likes": 70, "shares": 6, "comments": 1}},
+        )
+        created = push_social_to_platform(art)
+        self.assertEqual(len(created), 1)
+        post = created[0]
+        self.assertEqual(post.platform, "LinkedIn")
+        self.assertEqual(post.sentiment, "positive")
+        self.assertEqual(post.reach, 70)        # likes / reactions
+        self.assertEqual(int(post.ave), 29828)  # author/page followers
+        self.assertEqual(SocialMediaPost.objects.count(), 1)
+
+    def test_country_defaults_to_org_country_when_post_has_none(self):
+        org = make_org(name="Debswana", keywords=["Debswana"])
+        org.country = "Botswana"
+        org.save(update_fields=["country"])
+        art = make_article(title="Debswana news", country="", signals={"platform": "x"})
+        post = push_social_to_platform(art)[0]
+        self.assertEqual(post.country, "Botswana")
+
+    def test_x_platform_stored_as_twitter(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        art = make_article(title="Debswana news", signals={"platform": "x"})
+        created = push_social_to_platform(art)
+        self.assertEqual(created[0].platform, "Twitter")
+
+    def test_unknown_platform_falls_back_to_other(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        art = make_article(title="Debswana news", signals={"platform": "myspace"})
+        self.assertEqual(push_social_to_platform(art)[0].platform, "Other")
+
+    def test_no_match_creates_nothing(self):
+        make_org(name="Copper", keywords=["copper"])
+        art = make_article(title="Debswana news", signals={"platform": "x"})
+        self.assertEqual(push_social_to_platform(art), [])
+        self.assertEqual(SocialMediaPost.objects.count(), 0)
+
+    def test_dedup_on_org_and_url(self):
+        make_org(name="Debswana", keywords=["Debswana"])
+        art = make_article(title="Debswana news", signals={"platform": "x"})
+        push_social_to_platform(art)
+        push_social_to_platform(art)
+        self.assertEqual(SocialMediaPost.objects.count(), 1)

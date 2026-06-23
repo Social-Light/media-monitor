@@ -34,11 +34,24 @@ from platform_sync.models import (
     CompetitorArticle,
     OnlineArticle,
     Organization,
+    SocialMediaPost,
 )
 
 logger = logging.getLogger(__name__)
 
 VALID_SENTIMENTS = {"positive", "negative", "neutral", "mixed"}
+
+# Map the crawler's internal platform key → the value the platform stores in
+# SocialMediaPost.platform (note: X is stored as "Twitter"). Unknown → "Other".
+PLATFORM_VALUE_MAP = {
+    "x":         "Twitter",
+    "twitter":   "Twitter",
+    "facebook":  "Facebook",
+    "instagram": "Instagram",
+    "linkedin":  "LinkedIn",
+    "youtube":   "YouTube",
+    "tiktok":    "TikTok",
+}
 
 
 def _resolve_sentiment(parsed_article) -> str:
@@ -167,5 +180,82 @@ def push_competitor_to_platform(parsed_article) -> list:
                 competitor.name, org.name, url, matched,
             )
             created.append(article)
+
+    return created
+
+
+def push_social_to_platform(parsed_article) -> list:
+    """
+    Create SocialMediaPost rows for every active organisation whose keywords match
+    this social post. The platform lists these under 'Social Media Posts' (distinct
+    from OnlineArticle), so crawler-captured social mentions must land here.
+
+    Mirrors push_to_platform's matching/relevancy, but writes SocialMediaPost and
+    maps the post's platform to the value the platform stores. Returns the list of
+    newly created SocialMediaPost instances.
+    """
+    created: list = []
+
+    title = (parsed_article.title or "").lower()
+    body = (parsed_article.body_text or "").lower()
+    if not title and not body:
+        return created
+
+    signals = parsed_article.signals or {}
+    platform_key = (signals.get("platform") or "").lower()
+    platform_value = PLATFORM_VALUE_MAP.get(platform_key, "Other")
+    page_name = (parsed_article.author or "")
+
+    # reach = reactions/likes the post got; ave = author/page follower count.
+    engagement = signals.get("engagement") or {}
+    try:
+        reach = int(engagement.get("likes") or 0)
+    except (TypeError, ValueError):
+        reach = 0
+    try:
+        followers = int(signals.get("followers") or 0)
+    except (TypeError, ValueError):
+        followers = 0
+
+    url = parsed_article.url
+    sentiment = _resolve_sentiment(parsed_article)
+    date_published = _published_date(parsed_article)
+    # Social posts carry no country of their own; attribute to the monitored org's.
+    article_country = (parsed_article.country or "")[:100]
+
+    for org in Organization.objects.filter(status="active"):
+        keywords = list(org.keywords.all())
+        matched = _matched_terms([kw.keyword for kw in keywords], title, body)
+        if not matched:
+            continue
+
+        if SocialMediaPost.objects.filter(organization=org, url=url).exists():
+            continue
+
+        competitors = list(org.competitors.all())
+        relevancy = compute_relevancy(
+            parsed_article.title, parsed_article.summary,
+            keywords=keywords, competitors=competitors,
+        )
+
+        post = SocialMediaPost.objects.create(
+            organization=org,
+            platform=platform_value,
+            page_name=page_name,
+            headline=parsed_article.title or "",
+            summary=parsed_article.summary or "",
+            url=url[:2000],
+            date_published=date_published,
+            country=article_country or (org.country or "")[:100],
+            sentiment=sentiment,
+            relevancy=relevancy,
+            reach=reach,
+            ave=followers,
+        )
+        logger.info(
+            "Bridge: SocialMediaPost (%s) for org '%s' from %s (relevancy=%.2f, terms=%s)",
+            platform_value, org.name, url, relevancy, matched,
+        )
+        created.append(post)
 
     return created

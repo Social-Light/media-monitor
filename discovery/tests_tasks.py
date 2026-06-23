@@ -188,6 +188,65 @@ class RunSeedDiscoveryTaskTests(TestCase):
         self.assertEqual(DiscoveredURL.objects.count(), 3)
 
 
+# ── run_seed_discovery — social branch ────────────────────────────────────────
+
+class RunSeedDiscoverySocialTests(TestCase):
+    """A SOCIAL seed ingests posts directly instead of storing PENDING URLs."""
+
+    def setUp(self):
+        self.seed = make_seed(
+            source_type=SourceType.SOCIAL,
+            url="https://apify.example/social/1",
+            meta={"platform": "x"},
+        )
+
+    def _posts(self, n=2):
+        return [
+            {
+                "url": f"https://x.com/u/status/{i}",
+                "platform": "x",
+                "text": f"Post {i} mentioning gold",
+                "title": f"Post {i} mentioning gold",
+                "snippet": f"Post {i} mentioning gold",
+                "source_type": "social",
+            }
+            for i in range(1, n + 1)
+        ]
+
+    def test_social_seed_uses_ingest_path(self):
+        posts = self._posts(2)
+        with patch("discovery.tasks.run_discovery", return_value=posts), \
+             patch("discovery.tasks.ingest_social_post", return_value=object()) as mock_ingest:
+            result = run_seed_discovery.apply(args=[self.seed.pk])
+
+        self.assertEqual(result.result["status"], "ok")
+        self.assertEqual(result.result["new"], 2)
+        self.assertEqual(mock_ingest.call_count, 2)
+        # No DiscoveredURLs are created via the news path for social seeds.
+        self.assertEqual(DiscoveredURL.objects.count(), 0)
+
+    def test_social_keyword_filter_skips_non_matching(self):
+        self.seed.keyword_filter = "diamond"
+        self.seed.save()
+        posts = self._posts(2)  # texts mention "gold", not "diamond"
+        with patch("discovery.tasks.run_discovery", return_value=posts), \
+             patch("discovery.tasks.ingest_social_post") as mock_ingest:
+            result = run_seed_discovery.apply(args=[self.seed.pk])
+
+        mock_ingest.assert_not_called()
+        self.assertEqual(result.result["skipped_keyword"], 2)
+        self.assertEqual(result.result["new"], 0)
+
+    def test_social_counts_already_seen_as_skipped(self):
+        posts = self._posts(2)
+        with patch("discovery.tasks.run_discovery", return_value=posts), \
+             patch("discovery.tasks.ingest_social_post", return_value=None):
+            result = run_seed_discovery.apply(args=[self.seed.pk])
+        # ingest returning None means "already seen / no URL".
+        self.assertEqual(result.result["new"], 0)
+        self.assertEqual(result.result["skipped_duplicate"], 2)
+
+
 # ── run_all_seeds task ────────────────────────────────────────────────────────
 
 class RunAllSeedsTaskTests(TestCase):

@@ -165,6 +165,21 @@ CRAWLER = {
     "BING_API_KEY":       env("BING_API_KEY",            default=""),
     "GOOGLE_NEWS_API_KEY":env("GOOGLE_NEWS_API_KEY",     default=""),
     "GOOGLE_CSE_ID":      env("GOOGLE_CSE_ID",           default=""),
+
+    # ── Apify (social media monitoring) ─────────────────────────────────────
+    # One API token; one Actor per platform. Actor IDs are env-overridable
+    # because the marketplace's "best" scraper for each platform changes over
+    # time — swapping an actor must never need a code change. Per-seed
+    # meta["actor_input"] can override the request body for fine tuning.
+    "APIFY_API_TOKEN":    env("APIFY_API_TOKEN",         default=""),
+    "APIFY_MAX_ITEMS":    env.int("APIFY_MAX_ITEMS",     default=50),
+    "APIFY_TIMEOUT":      env.int("APIFY_TIMEOUT",       default=120),
+    "APIFY_ACTORS": {
+        "x":         env("APIFY_ACTOR_X",         default="apidojo/tweet-scraper"),
+        "facebook":  env("APIFY_ACTOR_FACEBOOK",  default="apify/facebook-posts-scraper"),
+        "instagram": env("APIFY_ACTOR_INSTAGRAM", default="apify/instagram-scraper"),
+        "linkedin":  env("APIFY_ACTOR_LINKEDIN",  default="apimaestro/linkedin-posts-search-scraper-no-cookies"),
+    },
 }
 
 # ── Elasticsearch ─────────────────────────────────────────────────────────────

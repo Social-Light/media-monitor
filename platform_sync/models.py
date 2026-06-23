@@ -1,7 +1,7 @@
 """
 platform_sync/models.py
 ─────────────────────────
-Mirror of the five media-monitoring **platform** models the crawler writes into
+Mirror of the media-monitoring **platform** models the crawler reads/writes
 (the platform itself lives in the `socialmonitor` project / `monitor` app).
 
 These are an exact copy of the relevant fields from monitor/models.py so that,
@@ -17,9 +17,10 @@ Managed flag:
         the platform owns its tables; Django never migrates them. Routing to the
         separate `platform` database is handled by platform_sync.routers.
 
-Only Organization, Keyword, Competitor, OnlineArticle and CompetitorArticle are
-mirrored — the crawler only ever reads orgs/keywords/competitors and writes the
-two article tables.
+Organization, Keyword, Competitor, OnlineArticle, CompetitorArticle and
+SocialMediaPost are mirrored — the crawler reads orgs/keywords/competitors and
+writes coverage: OnlineArticle/CompetitorArticle for news, SocialMediaPost for
+social-media mentions (the platform's 'Social Media Posts').
 """
 import re
 import uuid
@@ -36,6 +37,18 @@ SENTIMENT_CHOICES = [
     ("neutral", "Neutral"),
     ("negative", "Negative"),
     ("mixed", "Mixed"),
+]
+
+# Mirror of the platform's PLATFORM_CHOICES (monitor/models.py). The STORED value
+# is what the crawler must write — note X is stored as "Twitter".
+PLATFORM_CHOICES = [
+    ("Facebook", "Facebook"),
+    ("Twitter", "X"),
+    ("Instagram", "Instagram"),
+    ("LinkedIn", "LinkedIn"),
+    ("YouTube", "YouTube"),
+    ("TikTok", "TikTok"),
+    ("Other", "Other"),
 ]
 
 COVERAGE_CHOICES = [
@@ -216,4 +229,36 @@ class OnlineArticle(models.Model):
     class Meta:
         managed = PLATFORM_MANAGED
         db_table = "monitor_onlinearticle"
+        ordering = ["-date_published", "-created_at"]
+
+
+class SocialMediaPost(models.Model):
+    """A social-media mention (Facebook / X / Instagram / LinkedIn …). Distinct
+    from OnlineArticle: the platform dashboard lists these under 'Social Media
+    Posts', so crawler-captured social mentions must be written here, not as
+    OnlineArticle rows."""
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="social_posts"
+    )
+    platform = models.CharField(max_length=50, choices=PLATFORM_CHOICES, default="Facebook")
+    page_name = models.TextField(blank=True)
+    headline = models.TextField()
+    summary = models.TextField(blank=True)
+    url = models.URLField(blank=True, max_length=2000)
+    date_published = models.DateField()
+    country = models.CharField(max_length=100, blank=True)
+    sentiment = models.CharField(max_length=20, choices=SENTIMENT_CHOICES, default="neutral")
+    ave = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    rank = models.FloatField(default=0)
+    reach = models.IntegerField(default=0)
+    relevancy = models.FloatField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.headline[:60]
+
+    class Meta:
+        managed = PLATFORM_MANAGED
+        db_table = "monitor_socialmediapost"
         ordering = ["-date_published", "-created_at"]

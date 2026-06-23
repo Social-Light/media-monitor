@@ -24,8 +24,9 @@ from celery import shared_task
 from django.utils import timezone
 
 from core.models import URLStatusChoices
-from discovery.models import DiscoveredURL, SeedSource
+from discovery.models import DiscoveredURL, SeedSource, SourceType
 from discovery.services import run_discovery
+from fetcher.social_ingest import ingest_social_post
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,42 @@ def _store_discovered_urls(seed: SeedSource, items: list[dict]) -> dict:
     }
 
 
+def _ingest_social_posts(seed: SeedSource, items: list[dict]) -> dict:
+    """
+    Ingest social posts (from a SOCIAL seed) directly into ParsedArticles.
+
+    Social posts arrive fully-formed from Apify, so they skip the fetch/parse
+    pipeline entirely — each is materialised via fetcher.social_ingest, which
+    also runs dedup, indexing, alerts, matching, and the platform bridge.
+
+    The seed's keyword_filter is still applied (against the post text) so a
+    seed can narrow a broad platform search. Returns the same summary shape as
+    _store_discovered_urls so the task result is uniform across source types.
+    """
+    keywords        = seed.keywords
+    new             = 0
+    skipped_keyword = 0
+    skipped_existing = 0
+
+    for item in items:
+        if not _matches_keywords(item, keywords):
+            skipped_keyword += 1
+            continue
+
+        article = ingest_social_post(seed, item)
+        if article is None:
+            skipped_existing += 1
+        else:
+            new += 1
+
+    return {
+        "attempted":         len(items),
+        "new":               new,
+        "skipped_duplicate": skipped_existing,
+        "skipped_keyword":   skipped_keyword,
+    }
+
+
 # ── Task 1 — single seed ──────────────────────────────────────────────────────
 
 @shared_task(
@@ -159,7 +196,13 @@ def run_seed_discovery(self, seed_id: int) -> dict:
         raise self.retry(exc=exc)
 
     # ── Store ──────────────────────────────────────────────────────────────
-    summary = _store_discovered_urls(seed, items)
+    # Social posts arrive fully-formed and are materialised directly into
+    # ParsedArticles; every other source type stores PENDING DiscoveredURLs for
+    # the fetcher to pick up.
+    if seed.source_type == SourceType.SOCIAL:
+        summary = _ingest_social_posts(seed, items)
+    else:
+        summary = _store_discovered_urls(seed, items)
 
     # ── Stamp ──────────────────────────────────────────────────────────────
     seed.mark_crawled()

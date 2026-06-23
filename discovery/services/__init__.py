@@ -21,6 +21,7 @@ from .rss            import fetch_feed
 from .sitemap        import fetch_sitemap, discover_sitemap_url
 from .link_extractor import extract_links
 from .search_api     import search
+from .apify          import fetch_mentions
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ __all__ = [
     "discover_sitemap_url",
     "extract_links",
     "search",
+    "fetch_mentions",
     "run_discovery",
 ]
 
@@ -56,6 +58,10 @@ def run_discovery(seed) -> list[dict]:
         search_api — provider ("bing" | "google", default "bing"),
                      query (str, defaults to seed.name),
                      count (int, default 20)
+        social     — platform ("x" | "facebook" | "instagram" | "linkedin"),
+                     query (str | list, defaults to seed keywords then name),
+                     max_items (int, default settings APIFY_MAX_ITEMS),
+                     actor_input (dict, optional Actor-input overrides)
     """
     from discovery.models import SourceType
 
@@ -97,6 +103,17 @@ def run_discovery(seed) -> list[dict]:
             query=meta.get("query", default_query),
             provider=meta.get("provider", "bing"),
             count=meta.get("count", 20),
+        )
+
+    # ── Social media (Apify) ────────────────────────────────────────────────────
+    elif source_type == SourceType.SOCIAL:
+        # Search terms default to the seed's keywords, falling back to its name.
+        terms = meta.get("query") or seed.keywords or [seed.name]
+        return fetch_mentions(
+            platform=meta.get("platform", "x"),
+            terms=terms,
+            max_items=meta.get("max_items"),
+            actor_input=meta.get("actor_input"),
         )
 
     # ── Manual / unknown ──────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ from discovery.models import DiscoveredURL
 from fetcher.country import detect_country
 from fetcher.dedup import check_and_mark_duplicate
 from fetcher.extractor import apply_rule, get_rule_for_page
+from fetcher.news_filter import is_news_article
 from fetcher.nlp import run_nlp
 from fetcher.playwright_fetcher import render_page
 from fetcher.search import index_article
@@ -230,7 +231,7 @@ def parse_page(fetched_page):
         logger.warning("Organisation matching failed for %s: %s", url, exc)
 
     try:
-        if not parsed_article.is_duplicate:
+        if not parsed_article.is_duplicate and is_news_article(parsed_article):
             push_to_platform(parsed_article)
             push_competitor_to_platform(parsed_article)
     except Exception as exc:
