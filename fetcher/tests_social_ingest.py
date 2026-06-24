@@ -127,8 +127,8 @@ class IngestSocialPostTests(TestCase):
         # platform "x" is stored as "Twitter"; author becomes the page_name.
         self.assertEqual(post.platform, "Twitter")
         self.assertEqual(post.page_name, "Jane Doe (@jane)")
-        self.assertEqual(post.reach, 10)        # likes / reactions
-        self.assertEqual(int(post.ave), 5000)   # followers
+        self.assertEqual(post.reach, 5000)         # reach = follower count
+        self.assertEqual(float(post.ave), 1750.0)  # 5000 * 0.35
 
     def test_bridge_no_push_without_keyword_match(self):
         Organization.objects.create(name="Copper Co", status="active").keywords.create(keyword="copper")

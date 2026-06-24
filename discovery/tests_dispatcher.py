@@ -134,6 +134,35 @@ class RunDiscoveryDispatcherTests(TestCase):
         call_kwargs = mock.call_args[1]
         self.assertEqual(call_kwargs["query"], "My Mining Monitor")
 
+    # ── Social (Apify) ────────────────────────────────────────────────────────
+
+    def test_social_calls_fetch_mentions_with_seed_query(self):
+        seed = make_seed(SourceType.SOCIAL, url="https://linkedin.x/1",
+                         meta={"platform": "linkedin", "query": "Debswana"})
+        with patch("discovery.services.fetch_mentions", return_value=[FAKE_ARTICLE]) as mock:
+            results = run_discovery(seed)
+        mock.assert_called_once_with(platform="linkedin", terms="Debswana",
+                                     max_items=None, actor_input=None)
+        self.assertEqual(results, [FAKE_ARTICLE])
+
+    def test_social_from_orgs_searches_each_active_org_keyword(self):
+        from platform_sync.models import Organization
+        org = Organization.objects.create(name="Debswana", status="active")
+        org.keywords.create(keyword="Debswana")
+        org.keywords.create(keyword="Jwaneng")
+        inactive = Organization.objects.create(name="Old Co", status="inactive")
+        inactive.keywords.create(keyword="ignore-me")
+
+        seed = make_seed(SourceType.SOCIAL, url="https://linkedin.x/orgs",
+                         meta={"platform": "linkedin", "from_orgs": True})
+        with patch("discovery.services.fetch_mentions", return_value=[FAKE_ARTICLE]) as mock:
+            results = run_discovery(seed)
+
+        # One search per active-org keyword; inactive org keyword excluded.
+        called_terms = [c.args[1] for c in mock.call_args_list]
+        self.assertCountEqual(called_terms, [["Debswana"], ["Jwaneng"]])
+        self.assertEqual(len(results), 2)  # FAKE_ARTICLE per keyword search
+
     # ── Manual / unknown ──────────────────────────────────────────────────────
 
     def test_manual_source_type_returns_empty_list(self):

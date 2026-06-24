@@ -27,6 +27,7 @@ Existing coverage is never duplicated — (organization, url) is checked first.
 """
 import logging
 
+from django.conf import settings
 from django.utils import timezone
 
 from fetcher.relevancy import compute_relevancy
@@ -52,6 +53,17 @@ PLATFORM_VALUE_MAP = {
     "youtube":   "YouTube",
     "tiktok":    "TikTok",
 }
+
+
+def _social_ave(reach: int) -> float:
+    """
+    Advertising Value Equivalent for a social post: AVE = reach * AVE_RATE.
+    reach is the page/author follower count; AVE_RATE (settings.CRAWLER["AVE_RATE"],
+    default 0.35) mirrors the rate the platform's own social data uses. Computed
+    in the background so social coverage carries an AVE without manual entry.
+    """
+    rate = settings.CRAWLER.get("AVE_RATE", 0.35)
+    return round(reach * rate, 2)
 
 
 def _resolve_sentiment(parsed_article) -> str:
@@ -206,16 +218,13 @@ def push_social_to_platform(parsed_article) -> list:
     platform_value = PLATFORM_VALUE_MAP.get(platform_key, "Other")
     page_name = (parsed_article.author or "")
 
-    # reach = reactions/likes the post got; ave = author/page follower count.
-    engagement = signals.get("engagement") or {}
+    # reach = author/page follower count (audience); ave is auto-computed from it.
+    # Reactions/comments/shares remain in signals.engagement for reference.
     try:
-        reach = int(engagement.get("likes") or 0)
+        reach = int(signals.get("followers") or 0)
     except (TypeError, ValueError):
         reach = 0
-    try:
-        followers = int(signals.get("followers") or 0)
-    except (TypeError, ValueError):
-        followers = 0
+    ave = _social_ave(reach)
 
     url = parsed_article.url
     sentiment = _resolve_sentiment(parsed_article)
@@ -250,7 +259,7 @@ def push_social_to_platform(parsed_article) -> list:
             sentiment=sentiment,
             relevancy=relevancy,
             reach=reach,
-            ave=followers,
+            ave=ave,
         )
         logger.info(
             "Bridge: SocialMediaPost (%s) for org '%s' from %s (relevancy=%.2f, terms=%s)",

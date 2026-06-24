@@ -174,6 +174,11 @@ CRAWLER = {
     "APIFY_API_TOKEN":    env("APIFY_API_TOKEN",         default=""),
     "APIFY_MAX_ITEMS":    env.int("APIFY_MAX_ITEMS",     default=50),
     "APIFY_TIMEOUT":      env.int("APIFY_TIMEOUT",       default=120),
+    # AVE (Advertising Value Equivalent) for social posts. The platform's own
+    # social data uses ave = reach * 0.35 (reach = follower/audience count),
+    # consistent across X/Facebook/Instagram/LinkedIn — so we mirror that rate.
+    # Override via AVE_RATE if the platform changes it.
+    "AVE_RATE":           env.float("AVE_RATE",          default=0.35),
     "APIFY_ACTORS": {
         "x":         env("APIFY_ACTOR_X",         default="apidojo/tweet-scraper"),
         "facebook":  env("APIFY_ACTOR_FACEBOOK",  default="apify/facebook-posts-scraper"),

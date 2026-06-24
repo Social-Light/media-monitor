@@ -17,6 +17,7 @@ from discovery.models import DiscoveredURL, SeedSource
 from fetcher.bridge import (
     _matched_terms,
     _resolve_sentiment,
+    _social_ave,
     push_competitor_to_platform,
     push_social_to_platform,
     push_to_platform,
@@ -301,9 +302,21 @@ class PushSocialToPlatformTests(TestCase):
         post = created[0]
         self.assertEqual(post.platform, "LinkedIn")
         self.assertEqual(post.sentiment, "positive")
-        self.assertEqual(post.reach, 70)        # likes / reactions
-        self.assertEqual(int(post.ave), 29828)  # author/page followers
+        self.assertEqual(post.reach, 29828)            # reach = follower count
+        # ave auto-computed: 29828 * 0.35 = 10439.80
+        self.assertEqual(float(post.ave), 10439.80)
         self.assertEqual(SocialMediaPost.objects.count(), 1)
+
+    def test_social_ave_formula(self):
+        # AVE = reach * AVE_RATE (default 0.35) — matches the platform's social data.
+        self.assertEqual(_social_ave(0), 0.0)
+        self.assertEqual(_social_ave(26000), 9100.0)     # cf. CSV: 26000 -> 9100
+        self.assertEqual(_social_ave(77041), 26964.35)   # cf. CSV: 77041 -> 26964.35
+
+    def test_social_ave_respects_configured_rate(self):
+        from django.test import override_settings
+        with override_settings(CRAWLER={"AVE_RATE": 0.5}):
+            self.assertEqual(_social_ave(1000), 500.0)
 
     def test_country_defaults_to_org_country_when_post_has_none(self):
         org = make_org(name="Debswana", keywords=["Debswana"])

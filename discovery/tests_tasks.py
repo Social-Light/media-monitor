@@ -237,6 +237,21 @@ class RunSeedDiscoverySocialTests(TestCase):
         self.assertEqual(result.result["skipped_keyword"], 2)
         self.assertEqual(result.result["new"], 0)
 
+    def test_from_orgs_seed_ignores_seed_keyword_filter(self):
+        # An org-driven seed must NOT re-filter on its own keyword_filter, or it
+        # would drop posts found via other org keywords.
+        self.seed.meta = {"platform": "linkedin", "from_orgs": True}
+        self.seed.keyword_filter = "diamond"   # would otherwise skip "gold" posts
+        self.seed.save()
+        posts = self._posts(2)  # texts mention "gold", not "diamond"
+        with patch("discovery.tasks.run_discovery", return_value=posts), \
+             patch("discovery.tasks.ingest_social_post", return_value=object()) as mock_ingest:
+            result = run_seed_discovery.apply(args=[self.seed.pk])
+
+        self.assertEqual(mock_ingest.call_count, 2)
+        self.assertEqual(result.result["skipped_keyword"], 0)
+        self.assertEqual(result.result["new"], 2)
+
     def test_social_counts_already_seen_as_skipped(self):
         posts = self._posts(2)
         with patch("discovery.tasks.run_discovery", return_value=posts), \

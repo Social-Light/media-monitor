@@ -125,11 +125,15 @@ def _ingest_social_posts(seed: SeedSource, items: list[dict]) -> dict:
     pipeline entirely — each is materialised via fetcher.social_ingest, which
     also runs dedup, indexing, alerts, matching, and the platform bridge.
 
-    The seed's keyword_filter is still applied (against the post text) so a
-    seed can narrow a broad platform search. Returns the same summary shape as
-    _store_discovered_urls so the task result is uniform across source types.
+    The seed's keyword_filter narrows a broad platform search — EXCEPT for
+    org-driven seeds (meta {"from_orgs": true}), where the search already targets
+    the active orgs' keywords and capture is gated by the bridge; applying the
+    seed filter there would wrongly drop posts found via other org keywords.
+    Returns the same summary shape as _store_discovered_urls so the task result
+    is uniform across source types.
     """
-    keywords        = seed.keywords
+    from_orgs       = bool((seed.meta or {}).get("from_orgs"))
+    keywords        = [] if from_orgs else seed.keywords
     new             = 0
     skipped_keyword = 0
     skipped_existing = 0
