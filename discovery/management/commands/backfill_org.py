@@ -36,8 +36,9 @@ from django.utils import timezone
 
 from core.models import URLStatusChoices
 from discovery.models import DiscoveredURL, SeedSource, SourceType
-from discovery.services import search
+from discovery.services import run_discovery, search
 from discovery.services.apify import fetch_mentions
+from discovery.tasks import _matches_keywords
 from fetcher.services import fetch_and_parse
 from fetcher.social_ingest import ingest_social_post
 from platform_sync.models import Organization
@@ -92,8 +93,16 @@ class Command(BaseCommand):
         parser.add_argument("--start", required=True, help="Start date, YYYY-MM-DD.")
         parser.add_argument("--end", default=None, help="End date, YYYY-MM-DD (default: today).")
         parser.add_argument(
-            "--source", choices=["news", "social", "both"], default="both",
-            help="Which sources to back-search (default: both).",
+            "--source", choices=["news", "social", "seeds", "both", "all"], default="both",
+            help=(
+                "Which sources to back-search. news = search API (Google/Bing); "
+                "social = Apify; seeds = your existing configured SeedSources "
+                "(no external API); both = news + social (default); all = everything."
+            ),
+        )
+        parser.add_argument(
+            "--seed-limit", type=int, default=None,
+            help="For --source seeds: cap how many existing seeds to crawl (default: all).",
         )
         parser.add_argument(
             "--provider", choices=["google", "bing"], default="google",
@@ -143,10 +152,12 @@ class Command(BaseCommand):
         source = options["source"]
         totals = {"found": 0, "new": 0, "skipped_existing": 0, "skipped_out_of_range": 0}
 
-        if source in ("news", "both"):
+        if source in ("news", "both", "all"):
             self._backfill_news(seed, keywords, start, end, options, totals)
-        if source in ("social", "both"):
+        if source in ("social", "both", "all"):
             self._backfill_social(seed, keywords, start, end, options, totals)
+        if source in ("seeds", "all"):
+            self._backfill_seeds(keywords, start, end, options, totals)
 
         self.stdout.write(self.style.SUCCESS(
             f"\nDone. found={totals['found']} new={totals['new']} "
@@ -247,6 +258,59 @@ class Command(BaseCommand):
             self.stdout.write(f"  [ok] {result.get('title', '')[:70]}")
         else:
             self.stdout.write(self.style.WARNING(f"  [{result.get('status')}] {url}"))
+
+    # ── Existing seeds (no external API) ────────────────────────────────────────
+
+    def _backfill_seeds(self, keywords, start, end, options, totals):
+        """
+        Back-search the org's keywords across the already-configured SeedSources
+        (RSS / sitemap / seed_url / search_api) — no Google/Apify needed.
+
+        Each seed is run through the normal discovery service; items are kept only
+        when they match one of the org's keywords AND fall in the date window, then
+        ingested via fetch_and_parse. Hits are attributed to the ORIGINAL seed, so
+        source attribution stays correct.
+
+        Caveat: rss / seed_url surface only what those sites currently expose
+        (recent articles / today's links); only sitemap seeds reliably reach far
+        back. A seed with its own keyword_filter is pre-filtered by that filter, so
+        it may not surface a brand-new org's keyword — clear the seed's filter if
+        you want it to feed every back-search.
+        """
+        lowered = [k.lower() for k in keywords]
+        seeds = (SeedSource.objects
+                 .filter(is_active=True)
+                 .exclude(source_type=SourceType.SOCIAL)
+                 .exclude(url__startswith="backfill://")
+                 .order_by("name"))
+        if options["seed_limit"]:
+            seeds = seeds[:options["seed_limit"]]
+
+        seeds = list(seeds)
+        self.stdout.write(f"\nSeed back-search across {len(seeds)} existing seed(s)...")
+        seen_hashes = set()
+        for seed in seeds:
+            try:
+                items = run_discovery(seed)
+            except Exception as exc:  # a single bad seed must not abort the run
+                self.stdout.write(self.style.WARNING(f"  [skip] {seed.name}: {exc}"))
+                continue
+            for item in items:
+                url = (item.get("url") or "").strip()
+                if not url:
+                    continue
+                if not _matches_keywords(item, lowered):
+                    continue
+                if not within_range(item.get("published_at"), start, end):
+                    totals["skipped_out_of_range"] += 1
+                    continue
+                url_hash = DiscoveredURL.hash_url(url)
+                if url_hash in seen_hashes:
+                    continue
+                seen_hashes.add(url_hash)
+                totals["found"] += 1
+                # Attribute the hit to the real seed it came from, not the backfill seed.
+                self._ingest_news_url(seed, item, url_hash, options["dry_run"], totals)
 
     # ── Social ─────────────────────────────────────────────────────────────────
 

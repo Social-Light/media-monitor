@@ -158,6 +158,56 @@ class NewsBackfillTests(TestCase):
         self.assertNotIn("date_range", kwargs)
 
 
+# ── Seed back-search (existing sources, no external API) ────────────────────────
+
+class SeedBackfillTests(TestCase):
+    def setUp(self):
+        make_org(keywords=(("Debswana", "brand"),))
+        self.seed = SeedSource.objects.create(
+            name="Mmegi", url="https://mmegi.bw/feed", source_type=SourceType.RSS,
+        )
+
+    @patch(f"{CMD}.fetch_and_parse", return_value={"status": "ok", "title": "T"})
+    @patch(f"{CMD}.run_discovery")
+    def test_matching_item_ingested_and_attributed_to_real_seed(self, mock_disc, mock_fp):
+        mock_disc.return_value = [{
+            "url": "https://mmegi.bw/a", "title": "Debswana output up",
+            "snippet": "", "published_at": datetime(2026, 2, 1, tzinfo=dt_timezone.utc),
+        }]
+        call_command("backfill_org", "--org", "Debswana",
+                     "--start", "2026-01-01", "--end", "2026-03-31",
+                     "--source", "seeds", stdout=StringIO())
+        du = DiscoveredURL.objects.get(url="https://mmegi.bw/a")
+        self.assertEqual(du.seed, self.seed)   # attributed to the source seed
+        mock_fp.assert_called_once()
+
+    @patch(f"{CMD}.fetch_and_parse")
+    @patch(f"{CMD}.run_discovery")
+    def test_non_matching_item_skipped(self, mock_disc, mock_fp):
+        mock_disc.return_value = [{
+            "url": "https://mmegi.bw/b", "title": "Weather report",
+            "snippet": "rain", "published_at": None,
+        }]
+        call_command("backfill_org", "--org", "Debswana", "--start", "2026-01-01",
+                     "--source", "seeds", stdout=StringIO())
+        self.assertFalse(DiscoveredURL.objects.filter(url="https://mmegi.bw/b").exists())
+        mock_fp.assert_not_called()
+
+    @patch(f"{CMD}.fetch_and_parse")
+    @patch(f"{CMD}.run_discovery")
+    def test_social_seeds_excluded(self, mock_disc, mock_fp):
+        SeedSource.objects.create(
+            name="X seed", url="https://x.example/seed", source_type=SourceType.SOCIAL,
+        )
+        mock_disc.return_value = []
+        call_command("backfill_org", "--org", "Debswana", "--start", "2026-01-01",
+                     "--source", "seeds", stdout=StringIO())
+        # run_discovery called once (RSS seed only), never for the social seed.
+        called_seeds = [c.args[0] for c in mock_disc.call_args_list]
+        self.assertIn(self.seed, called_seeds)
+        self.assertTrue(all(s.source_type != SourceType.SOCIAL for s in called_seeds))
+
+
 # ── Social back-search ──────────────────────────────────────────────────────────
 
 class SocialBackfillTests(TestCase):
