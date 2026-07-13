@@ -110,6 +110,7 @@ def search_google(
     count:        int = 10,
     date_restrict: str = "d7",
     cx:           str = "",
+    date_range:   tuple | None = None,
 ) -> list[dict]:
     """
     Query the Google Programmable Search Engine (Custom Search).
@@ -119,6 +120,12 @@ def search_google(
         count:         Results per page (max 10 — Google API hard limit).
         date_restrict: Restrict to recent results. "d7" = last 7 days.
         cx:            Search Engine ID. Falls back to settings.CRAWLER["GOOGLE_CSE_ID"].
+        date_range:    Optional (start_date, end_date) of datetime.date objects.
+                       When given, an ABSOLUTE range is requested via
+                       sort=date:r:YYYYMMDD:YYYYMMDD (used for historical
+                       back-fills) and date_restrict is ignored. This is the only
+                       provider that supports arbitrary date ranges — Bing News
+                       offers relative freshness (Day/Week/Month) only.
 
     Returns:
         List of article dicts.
@@ -133,14 +140,22 @@ def search_google(
         logger.warning("GOOGLE_CSE_ID not set — skipping Google search for '%s'", query)
         return []
 
+    if date_range:
+        start, end = date_range
+        sort_param = f"date:r:{start:%Y%m%d}:{end:%Y%m%d}"
+    else:
+        sort_param = "date"
+
     params = {
         "key":          api_key,
         "cx":           cse_id,
         "q":            query,
         "num":          min(count, 10),
-        "sort":         "date",
-        "dateRestrict": date_restrict,
+        "sort":         sort_param,
     }
+    # A relative window only makes sense when no absolute range was requested.
+    if not date_range:
+        params["dateRestrict"] = date_restrict
 
     logger.info("Google CSE search: '%s' (count=%d)", query, count)
     response = safe_get(GOOGLE_CSE_ENDPOINT, params=params)

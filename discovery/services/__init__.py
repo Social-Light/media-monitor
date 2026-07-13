@@ -39,7 +39,7 @@ __all__ = [
 ]
 
 
-def active_organisation_keywords() -> list[str]:
+def active_organisation_keywords(categories=("brand",)) -> list[str]:
     """
     Distinct keywords across all active platform organisations — original
     casing, de-duplicated case-insensitively.
@@ -48,11 +48,19 @@ def active_organisation_keywords() -> list[str]:
     X / etc. search stays in sync with the platform's configured organisations:
     add a keyword in the platform and the next run searches for it, with no seed
     edit. Capture is already gated on these same keywords by the bridge.
+
+    categories filters by Keyword.category (brand | personnel | campaign). It
+    DEFAULTS to brand-only — the main cost lever, since one Apify search runs per
+    keyword and personnel/campaign terms multiply that. Pass categories=None (or
+    the seed's meta["keyword_categories"]=null) to include every category.
     """
+    cats = set(categories) if categories else None
     terms: list[str] = []
     seen: set[str] = set()
     for org in Organization.objects.filter(status="active"):
         for kw in org.keywords.all():
+            if cats is not None and kw.category not in cats:
+                continue
             term = (kw.keyword or "").strip()
             if term and term.lower() not in seen:
                 seen.add(term.lower())
@@ -86,6 +94,9 @@ def run_discovery(seed) -> list[dict]:
                      from_orgs (bool — if true, search terms come from the active
                        platform organisations' keywords, one search per keyword;
                        ignores query),
+                     keyword_categories (list, only with from_orgs; which keyword
+                       categories to search — defaults to ["brand"] for cost
+                       control; null = all categories),
                      query (str | list, defaults to seed keywords then name),
                      max_items (int, default settings APIFY_MAX_ITEMS),
                      actor_input (dict, optional Actor-input overrides)
@@ -141,10 +152,17 @@ def run_discovery(seed) -> list[dict]:
         # Org-driven: pull search terms from the active platform organisations and
         # run one search per keyword, so the search set always matches what the
         # bridge will capture. New org keywords are picked up automatically.
+        # Defaults to BRAND keywords only (cost control — one Apify search per
+        # keyword); a seed can widen with meta["keyword_categories"] (list, or
+        # null for every category).
         if meta.get("from_orgs"):
             results: list[dict] = []
-            terms = active_organisation_keywords()
-            logger.info("run_discovery: org-driven social search over %d keyword(s)", len(terms))
+            categories = meta.get("keyword_categories", ["brand"])
+            terms = active_organisation_keywords(categories=categories)
+            logger.info(
+                "run_discovery: org-driven social search over %d keyword(s) (categories=%s)",
+                len(terms), categories,
+            )
             for term in terms:
                 results.extend(fetch_mentions(
                     platform, [term], max_items=max_items, actor_input=actor_input,

@@ -120,11 +120,20 @@ class BuildInputTests(TestCase):
         payload = _build_input("facebook", ["gold", "mining"], 10)
         self.assertEqual(payload, {"resultsLimit": 10})
 
-    def test_instagram_hashtag_search(self):
-        payload = _build_input("instagram", ["gold"], 10)
+    def test_instagram_hashtag_directurls(self):
+        # IG keyword → explore/tags/<tag>/ URL (no working search endpoint).
+        payload = _build_input("instagram", ["Gold Mining"], 10)
         self.assertEqual(payload["resultsType"], "posts")
-        self.assertEqual(payload["searchType"], "hashtag")
-        self.assertEqual(payload["search"], "gold")
+        self.assertEqual(payload["resultsLimit"], 10)
+        self.assertEqual(payload["directUrls"],
+                         ["https://www.instagram.com/explore/tags/goldmining/"])
+
+    def test_instagram_multiple_terms_become_multiple_tag_urls(self):
+        payload = _build_input("instagram", ["Debswana", "Khoemacau"], 5)
+        self.assertEqual(payload["directUrls"], [
+            "https://www.instagram.com/explore/tags/debswana/",
+            "https://www.instagram.com/explore/tags/khoemacau/",
+        ])
 
     def test_linkedin_keyword_singular(self):
         payload = _build_input("linkedin", ["gold", "mining"], 10)
@@ -166,6 +175,22 @@ class NormaliseTests(TestCase):
         self.assertEqual(post["engagement"], {"likes": 12, "shares": 3, "comments": 1})
         self.assertIsInstance(post["published_at"], datetime)
         self.assertEqual(post["source_type"], "social")
+
+    def test_x_real_field_shape(self):
+        # apidojo/tweet-scraper: likeCount/retweetCount/replyCount + author.followers.
+        item = {
+            "url": "https://x.com/poaenglish/status/1",
+            "text": "Debswana eyeing 20% production surge",
+            "createdAt": "Fri Jun 26 00:01:00 +0000 2026",
+            "likeCount": 3, "retweetCount": 1, "replyCount": 0, "quoteCount": 1,
+            "author": {"name": "Pulse of Africa", "userName": "poaenglish", "followers": 2225},
+        }
+        post = _normalise("x", item)
+        self.assertEqual(post["author"], "Pulse of Africa")
+        self.assertEqual(post["author_handle"], "poaenglish")
+        self.assertEqual(post["followers"], 2225)
+        self.assertEqual(post["engagement"], {"likes": 3, "shares": 1, "comments": 0})
+        self.assertEqual(post["published_at"].year, 2026)
 
     def test_instagram_style_item(self):
         item = {
@@ -268,6 +293,19 @@ class FetchMentionsTests(TestCase):
     def test_no_terms_returns_empty(self):
         self.assertEqual(fetch_mentions("x", []), [])
         self.assertEqual(fetch_mentions("x", ["", "  "]), [])
+
+    @override_settings(CRAWLER=APIFY_SETTINGS)
+    @patch("discovery.services.apify._run_actor")
+    def test_facebook_page_based_runs_without_terms(self, mock_run):
+        # FB page-based: no keywords, but startUrls in actor_input must still run.
+        mock_run.return_value = [{"url": "https://facebook.com/p/1", "text": "Debswana news"}]
+        posts = fetch_mentions(
+            "facebook", [],
+            actor_input={"startUrls": [{"url": "https://facebook.com/mmgsocial"}]},
+        )
+        self.assertEqual(len(posts), 1)
+        payload = mock_run.call_args[0][1]
+        self.assertEqual(payload["startUrls"], [{"url": "https://facebook.com/mmgsocial"}])
 
     @override_settings(CRAWLER=APIFY_SETTINGS)
     @patch("discovery.services.apify._run_actor")

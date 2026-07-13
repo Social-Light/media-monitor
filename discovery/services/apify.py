@@ -81,7 +81,8 @@ _TEXT_KEYS   = ("text", "fullText", "content", "caption", "postText", "message",
 _NAME_KEYS   = ("authorName", "ownerFullName", "fullName", "name", "displayName")
 _HANDLE_KEYS = ("authorUsername", "ownerUsername", "username", "userName", "handle", "screenName")
 _DATE_KEYS   = ("timestamp", "createdAt", "date", "publishedAt", "time", "postedAtISO", "datePosted")
-_LIKE_KEYS   = ("likes", "likesCount", "favoriteCount", "reactionsCount", "numLikes", "total_reactions")
+_LIKE_KEYS   = ("likes", "likesCount", "likeCount", "favoriteCount", "favouriteCount",
+                "reactionsCount", "numLikes", "total_reactions")
 _SHARE_KEYS  = ("shares", "sharesCount", "retweetCount", "reshareCount", "numShares")
 _COMMENT_KEYS = ("comments", "commentsCount", "replyCount", "numComments")
 _FOLLOWER_KEYS = ("followers", "followersCount", "followerCount", "subscribers",
@@ -194,14 +195,18 @@ def _build_input(platform: str, terms: list[str], max_items: int) -> dict:
         # apify/facebook-posts-scraper is PAGE-based (no open keyword search on
         # Facebook). The Page URLs must be supplied per seed via
         # meta["actor_input"] = {"startUrls": [{"url": "https://facebook.com/<page>"}]};
-        # posts are then keyword-filtered downstream by the seed's keyword_filter.
+        # posts are then keyword-filtered downstream / matched by the bridge.
         return {"resultsLimit": max_items}
     if platform == "instagram":
-        # apify/instagram-scraper — keyword maps to a hashtag search → posts.
-        return {
-            "search": query, "searchType": "hashtag",
-            "resultsType": "posts", "resultsLimit": max_items,
-        }
+        # Instagram has no working keyword/hashtag *search* endpoint; scrape the
+        # hashtag page directly. Each term becomes an explore/tags/<tag>/ URL
+        # (lower-cased, non-alphanumerics stripped, since hashtags have none).
+        tags = []
+        for term in terms:
+            tag = re.sub(r"[^a-z0-9]", "", term.lower())
+            if tag:
+                tags.append(f"https://www.instagram.com/explore/tags/{tag}/")
+        return {"directUrls": tags, "resultsType": "posts", "resultsLimit": max_items}
     if platform == "linkedin":
         # apimaestro/linkedin-posts-search-scraper-no-cookies — singular "keyword".
         # Default to the most recent posts from the past month (current-month
@@ -323,7 +328,12 @@ def fetch_mentions(platform: str, terms, *, max_items: int | None = None,
         logger.warning("No Apify actor configured for platform '%s' — skipping", platform)
         return []
 
-    if not terms:
+    # URL-driven actors (Facebook page posts, Instagram direct profile/hashtag
+    # URLs supplied via actor_input) don't need search terms — the startUrls /
+    # directUrls drive them. Only keyword-search actors require terms.
+    url_driven = bool(actor_input and (actor_input.get("startUrls")
+                                       or actor_input.get("directUrls")))
+    if not terms and not url_driven:
         logger.warning("No search terms for %s social discovery — skipping", platform)
         return []
 

@@ -145,23 +145,39 @@ class RunDiscoveryDispatcherTests(TestCase):
                                      max_items=None, actor_input=None)
         self.assertEqual(results, [FAKE_ARTICLE])
 
-    def test_social_from_orgs_searches_each_active_org_keyword(self):
+    def test_social_from_orgs_searches_brand_keywords_only_by_default(self):
         from platform_sync.models import Organization
         org = Organization.objects.create(name="Debswana", status="active")
-        org.keywords.create(keyword="Debswana")
-        org.keywords.create(keyword="Jwaneng")
+        org.keywords.create(keyword="Debswana", category="brand")
+        org.keywords.create(keyword="Jwaneng", category="brand")
+        org.keywords.create(keyword="Koolatotse Koolatotse", category="personnel")  # excluded
         inactive = Organization.objects.create(name="Old Co", status="inactive")
-        inactive.keywords.create(keyword="ignore-me")
+        inactive.keywords.create(keyword="ignore-me", category="brand")
 
         seed = make_seed(SourceType.SOCIAL, url="https://linkedin.x/orgs",
                          meta={"platform": "linkedin", "from_orgs": True})
         with patch("discovery.services.fetch_mentions", return_value=[FAKE_ARTICLE]) as mock:
             results = run_discovery(seed)
 
-        # One search per active-org keyword; inactive org keyword excluded.
+        # One search per active-org BRAND keyword; personnel + inactive excluded.
         called_terms = [c.args[1] for c in mock.call_args_list]
         self.assertCountEqual(called_terms, [["Debswana"], ["Jwaneng"]])
-        self.assertEqual(len(results), 2)  # FAKE_ARTICLE per keyword search
+        self.assertEqual(len(results), 2)
+
+    def test_social_from_orgs_keyword_categories_override_widens(self):
+        from platform_sync.models import Organization
+        org = Organization.objects.create(name="Debswana", status="active")
+        org.keywords.create(keyword="Debswana", category="brand")
+        org.keywords.create(keyword="Koolatotse", category="personnel")
+
+        seed = make_seed(SourceType.SOCIAL, url="https://linkedin.x/orgs2",
+                         meta={"platform": "linkedin", "from_orgs": True,
+                               "keyword_categories": ["brand", "personnel"]})
+        with patch("discovery.services.fetch_mentions", return_value=[FAKE_ARTICLE]) as mock:
+            run_discovery(seed)
+
+        called_terms = [c.args[1] for c in mock.call_args_list]
+        self.assertCountEqual(called_terms, [["Debswana"], ["Koolatotse"]])
 
     # ── Manual / unknown ──────────────────────────────────────────────────────
 
