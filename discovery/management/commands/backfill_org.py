@@ -105,6 +105,15 @@ class Command(BaseCommand):
             help="For --source seeds: cap how many existing seeds to crawl (default: all).",
         )
         parser.add_argument(
+            "--seed-types", action="append",
+            choices=["rss", "sitemap", "seed_url", "search_api"], default=None,
+            help=(
+                "For --source seeds: restrict to these seed types. Repeatable. "
+                "Default: all non-social. Tip: 'rss' + 'sitemap' are fast and reach "
+                "back; 'seed_url' does a live page fetch per seed (slow, current links only)."
+            ),
+        )
+        parser.add_argument(
             "--provider", choices=["google", "bing"], default="google",
             help="News search provider. google supports absolute date ranges; bing does not (default: google).",
         )
@@ -283,17 +292,25 @@ class Command(BaseCommand):
                  .exclude(source_type=SourceType.SOCIAL)
                  .exclude(url__startswith="backfill://")
                  .order_by("name"))
+        if options["seed_types"]:
+            seeds = seeds.filter(source_type__in=options["seed_types"])
         if options["seed_limit"]:
             seeds = seeds[:options["seed_limit"]]
 
         seeds = list(seeds)
-        self.stdout.write(f"\nSeed back-search across {len(seeds)} existing seed(s)...")
+        total = len(seeds)
+        self.stdout.write(f"\nSeed back-search across {total} existing seed(s)...")
+        self.stdout.flush()
         seen_hashes = set()
-        for seed in seeds:
+        for i, seed in enumerate(seeds, 1):
+            # Print BEFORE the network call and flush, so a seed that stalls is
+            # visible (stdout is block-buffered when not attached to a TTY).
+            self.stdout.write(f"  [{i}/{total}] {seed.name} [{seed.source_type}] ...")
+            self.stdout.flush()
             try:
                 items = run_discovery(seed)
             except Exception as exc:  # a single bad seed must not abort the run
-                self.stdout.write(self.style.WARNING(f"  [skip] {seed.name}: {exc}"))
+                self.stdout.write(self.style.WARNING(f"      skip: {exc}"))
                 continue
             for item in items:
                 url = (item.get("url") or "").strip()
