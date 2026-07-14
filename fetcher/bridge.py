@@ -145,6 +145,51 @@ def push_to_platform(parsed_article) -> list:
     return created
 
 
+def push_article_for_org(parsed_article, org, coverage: str = "Earned"):
+    """
+    Force-create an OnlineArticle for ONE specific organisation, bypassing keyword
+    matching. Used for curated / manual back-fill (e.g. `ingest_urls`), where the
+    operator has already decided the article is about the org — the curation IS the
+    match, so this does not depend on the org's keywords (which may be missing,
+    contaminated, or simply absent from the article body).
+
+    Relevancy is still scored the same way (0 if no tracked term appears in the
+    headline/summary — consistent with the platform's own scorer). Dedup on
+    (organization, url). Returns the new OnlineArticle, or None if it already
+    existed. Never raises.
+    """
+    url = parsed_article.url
+    if not url:
+        return None
+    if OnlineArticle.objects.filter(organization=org, url=url).exists():
+        return None
+
+    keywords = list(org.keywords.all())
+    competitors = list(org.competitors.all())
+    relevancy = compute_relevancy(
+        parsed_article.title, parsed_article.summary,
+        keywords=keywords, competitors=competitors,
+    )
+
+    article = OnlineArticle.objects.create(
+        organization=org,
+        source=(parsed_article.source_domain or "")[:200],
+        headline=parsed_article.title or "",
+        summary=parsed_article.summary or "",
+        url=url[:2000],
+        date_published=_published_date(parsed_article),
+        country=(parsed_article.country or "")[:100],
+        sentiment=_resolve_sentiment(parsed_article),
+        coverage=coverage,
+        relevancy=relevancy,
+    )
+    logger.info(
+        "Bridge: forced OnlineArticle for org '%s' from %s (relevancy=%.2f)",
+        org.name, url, relevancy,
+    )
+    return article
+
+
 def push_competitor_to_platform(parsed_article) -> list:
     """
     Create CompetitorArticle rows for every competitor (of an active org) whose
