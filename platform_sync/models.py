@@ -193,6 +193,10 @@ class CompetitorArticle(models.Model):
     rank = models.FloatField(default=0)
     coverage_type = models.CharField(max_length=50, blank=True, default="Not Set")
     created_at = models.DateTimeField(auto_now_add=True)
+    # Platform added this NOT NULL column after this mirror model was written
+    # (managed=False, so Django never auto-detected the drift) — every bridge
+    # insert was failing with a not-null violation until this was added back.
+    is_archived = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.company_name}: {self.headline[:50]}"
@@ -222,6 +226,10 @@ class OnlineArticle(models.Model):
     reach = models.IntegerField(default=0)
     relevancy = models.FloatField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Platform added this NOT NULL column after this mirror model was written
+    # (managed=False, so Django never auto-detected the drift) — every bridge
+    # insert was failing with a not-null violation until this was added back.
+    is_archived = models.BooleanField(default=False)
 
     def __str__(self):
         return self.headline[:60]
