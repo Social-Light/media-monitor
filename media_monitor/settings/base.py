@@ -165,6 +165,8 @@ CRAWLER = {
     "BING_API_KEY":       env("BING_API_KEY",            default=""),
     "GOOGLE_NEWS_API_KEY":env("GOOGLE_NEWS_API_KEY",     default=""),
     "GOOGLE_CSE_ID":      env("GOOGLE_CSE_ID",           default=""),
+    "SERPER_API_KEY":     env("SERPER_API_KEY",          default=""),
+    "TAVILY_API_KEY":     env("TAVILY_API_KEY",          default=""),
 
     # ── Apify (social media monitoring) ─────────────────────────────────────
     # One API token; one Actor per platform. Actor IDs are env-overridable
