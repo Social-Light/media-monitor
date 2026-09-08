@@ -80,13 +80,15 @@ PLATFORM_DB_URL=postgres://sociallight:sociallight_password@db:5432/sociallight
 # Celery broker — use Redis DB index 1 so crawler keys don't collide with the platform (0)
 REDIS_URL=redis://redis:6379/1
 
-# Email — Resend via Anymail (same sender as the platform)
+# Email — SMTP (same sender as the platform)
 DEFAULT_FROM_EMAIL=Social Light <noreply@sociallight.africa>
-EMAIL_BACKEND=anymail.backends.resend.EmailBackend
-RESEND_API_KEY=<resend api key>
-# (SMTP fallback instead of Anymail: EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-#  with EMAIL_HOST=smtp.resend.com, EMAIL_PORT=587, EMAIL_HOST_USER=resend,
-#  EMAIL_HOST_PASSWORD=<resend api key>, EMAIL_USE_TLS=True)
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=<smtp host>
+EMAIL_PORT=587
+EMAIL_HOST_USER=<smtp username>
+EMAIL_HOST_PASSWORD=<smtp password>
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
 
 # Optional
 SENTRY_DSN=
@@ -248,5 +250,5 @@ in the platform UI under each organisation's online coverage.
   models to match (they are `managed=False`, so Django won't migrate them).
 - **Dashboard (optional)**: to expose `crawler_web` (port 8002), add an nginx
   location block; it has **no authentication** yet, so keep it internal/VPN-only.
-- **Secrets**: rotate the Anthropic key and Resend password currently in
+- **Secrets**: rotate the Anthropic key and the SMTP password currently in
   `socialmonitor/.env`; keep both `.env` files out of version control.
